@@ -8,6 +8,9 @@
 \usepackage{subcaption}
 \usepackage{booktabs}
 \usepackage{hyperref}
+\usepackage{multirow}
+% \usepackage{algorithm}
+\usepackage{algorithmic}
 \newcommand{\theHalgorithm}{\arabic{algorithm}}
 
 \usepackage[preprint]{icml2026}
@@ -17,6 +20,9 @@
 \usepackage{mathtools}
 \usepackage{amsthm}
 \usepackage[capitalize,noabbrev]{cleveref}
+
+% Graphics path for images
+\graphicspath{{../analysis/}}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % THEOREMS
@@ -32,14 +38,15 @@
 \theoremstyle{remark}
 \newtheorem{remark}[theorem]{Remark}
 
-\usepackage[textsize=tiny]{todonotes}
+\usepackage[textsize=small]{todonotes}
+\newcommand{\TODO}[1]{\todo[inline]{\textbf{TODO:} #1}}
 
-\icmltitlerunning{Statistical Learning Based Pediatric Appendicitis Prediction Project}
+\icmltitlerunning{Statistical Learning Based Pediatric Appendicitis Prediction}
 
 \begin{document}
 
 \twocolumn[
-  \icmltitle{Statistical Learning Based Pediatric Appendicitis Prediction Project}
+  \icmltitle{Statistical Learning Based Pediatric Appendicitis Prediction}
   
   \icmlsetsymbol{equal}{*}
 
@@ -55,7 +62,7 @@
   \icmlcorrespondingauthor{Wen Yuan}{2200010833@stu.pku.edu.cn}
   \icmlcorrespondingauthor{Jingxing Zhou}{2300010749@stu.pku.edu.cn}
 
-  \icmlkeywords{Statistical Learning, Pediatric Appendicitis}
+  \icmlkeywords{Statistical Learning, Pediatric Appendicitis, Classification, Missing Data Imputation, Tree-Based Methods}
 
   \vskip 0.3in
 ]
@@ -63,36 +70,659 @@
 \printAffiliationsAndNotice{\icmlEqualContribution}
 
 \begin{abstract}
-  This document provides a basic paper template and submission guidelines.
-  Abstracts must be a single paragraph, ideally between 4--6 sentences long.
-  Gross violations will trigger corrections at the camera-ready phase.
+Pediatric appendicitis is one of the most common acute surgical emergencies in childhood, with lifetime risks of 8.6\% for males and 6.7\% for females. Early and accurate diagnosis is crucial for preventing complications. In this study, we develop machine learning models to predict appendicitis diagnosis, severity, and management decisions using the Regensburg Pediatric Appendicitis Dataset from UCI, comprising 782 patients with 58 features. We focus on a clinically practical scenario where ultrasound imaging is unavailable, using only 45 non-ultrasound features. We conduct comprehensive data preprocessing, exploratory data analysis, and systematic model evaluation including logistic regression, random forest, gradient boosting, and other ensemble methods. Our best basic models achieve test accuracies of 75.64\% for diagnosis, 88.46\% for management, and 89.10\% for severity prediction. We also investigate various missing value imputation strategies (Median, KNN, MICE) and feature selection techniques to handle the inherent data incompleteness in clinical settings.\TODO{Add more about advanced tree methods and LLM.}
 \end{abstract}
 
 \section{Introduction}
+\label{sec:introduction}
 
-TBD
+Pediatric appendicitis represents one of the most prevalent acute surgical emergencies encountered in childhood medicine \citep{addiss1990epidemiology}. According to the National Institutes of Health (NIH), the lifetime risk of developing appendicitis is approximately 8.6\% for males and 6.7\% for females \citep{afridi2023combined}. The condition poses significant diagnostic challenges, particularly in pediatric populations where clinical presentation may be atypical and communication with young patients is inherently difficult.
 
-\section*{Accessibility}
+Early and accurate diagnosis of appendicitis is paramount for several reasons. Delayed diagnosis can lead to perforation, peritonitis, and other severe complications that significantly increase morbidity and mortality \citep{bhangu2015acute}. Conversely, unnecessary surgical interventions carry their own risks and contribute to healthcare costs. This diagnostic dilemma motivates the development of computational tools that can assist clinicians in making more informed decisions.
 
-TBD
+In this work, we leverage the Regensburg Pediatric Appendicitis Dataset \citep{marcinkevics2023regensburg}, sourced from Children's Hospital St. Hedwig in Regensburg, Germany, and collected between 2016 and 2021. This comprehensive dataset contains records from 782 patients with 58 features spanning demographic information, clinical scoring systems, physical examination findings, laboratory tests, and ultrasound imaging results.
+
+Importantly, our primary analysis focuses on a clinically practical scenario where ultrasound imaging is unavailable. Ultrasound, while highly informative for appendicitis diagnosis, is not universally accessible in all clinical settings, particularly in resource-limited environments or emergency situations. By excluding ultrasound-derived features (and the potentially leaky \texttt{Length\_of\_Stay} feature), we develop models using only 45 features after preprocessing that can be readily obtained from demographic data, physical examination, and laboratory tests. This approach ensures our models are applicable in a wider range of clinical contexts.
+
+Our study addresses three prediction tasks of clinical relevance:
+\begin{itemize}
+    \item \textbf{Diagnosis}: Determining whether a patient has appendicitis
+    \item \textbf{Severity}: Classifying appendicitis as complicated or uncomplicated
+    \item \textbf{Management}: Predicting whether surgical intervention is required
+\end{itemize}
+
+We employ a systematic machine learning pipeline encompassing data preprocessing, exploratory data analysis, feature selection, model training, and hyperparameter optimization. A particular focus of our work is addressing the challenge of missing data, which is ubiquitous in clinical datasets due to varying clinical protocols and patient conditions. In order to address this issue, we first establish baseline models using median imputation for missing values. Then we make a comprehensive survey of advanced tree-based methods that natively handle missing data, as well as compare different imputation strategies including KNN and MICE (Multiple Imputation by Chained Equations) to evaluate their impact on model performance. Additionally, we investigate the usage of large language models (LLMs) for clinical prediction tasks in the context of appendicitis.
+
+\section{Data Preprocessing}
+\label{sec:preprocessing}
+
+\subsection{Dataset Overview}
+
+The original dataset comprises 782 patient records with 58 features. The features can be categorized into several groups as shown in Table~\ref{tab:feature_categories}.
+
+\begin{table}[htb]
+\centering
+\caption{Feature categories in the dataset}
+\label{tab:feature_categories}
+\begin{tabular}{@{}lcp{4cm}@{}}
+\toprule
+Category & Count & Examples \\
+\midrule
+Demographic & 6 & Age, Sex, Height, Weight, BMI, Length of Stay \\
+Clinical Scores & 2 & Alvarado Score, Paediatric Appendicitis Score \\
+Clinical Exam & 10 & Migratory Pain, Lower Right Abdominal Pain, Nausea, Body Temperature \\
+Peritonitis & 3 & Generalized, Local, No peritonitis \\
+Stool & 4 & Constipation, Diarrhea, Normal \\
+Laboratory & 9 & WBC Count, Neutrophil \%, CRP, Hemoglobin \\
+Urinalysis & 12 & Ketones, RBC, WBC in urine \\
+Ultrasound & 22 & Appendix Diameter, Free Fluids, Perforation, etc. \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Data Cleaning and Transformation}
+
+We performed the following preprocessing steps:
+
+\textbf{Missing Target Removal}: Two samples with missing diagnosis labels were removed, resulting in 780 valid samples.
+
+\textbf{Feature Encoding}: Binary categorical variables were transformed using label encoding (0/1), while multi-class categorical variables were converted using one-hot encoding. This process expanded the feature space from the original 58 columns to 78 features.
+
+\textbf{Dataset Variants}: We created two dataset variants:
+\begin{itemize}
+    \item \textbf{All Features}: 780 samples $\times$ 78 features, including ultrasound-derived measurements
+    \item \textbf{No Ultrasound}: 780 samples $\times$ 45 features, excluding 22 ultrasound features and \texttt{Length\_of\_Stay} (identified as a potentially leaky feature since it is determined post-admission)
+\end{itemize}
+
+As emphasized in the introduction, our primary analysis uses the \textbf{No Ultrasound} dataset to ensure clinical applicability in settings where imaging is unavailable.
+
+\textbf{Train-Test Split}: Data was partitioned into training (624 samples, 80\%) and test (156 samples, 20\%) sets using stratified sampling based on the Diagnosis variable to maintain class distribution balance.
+
+\subsection{Missing Data Characteristics}
+
+Clinical datasets inherently suffer from incompleteness due to varying examination protocols and patient conditions. Table~\ref{tab:missing_data} summarizes the missing data rates for key features.
+
+\begin{table}[htb]
+\centering
+\caption{Missing data rates for selected features}
+\label{tab:missing_data}
+\begin{tabular}{@{}lrl@{}}
+\toprule
+Feature & Missing \% & Category \\
+\midrule
+Segmented Neutrophils & 93.1\% & Laboratory \\
+Appendix Diameter & 36.3\% & Ultrasound \\
+RBC in Urine & 26.3\% & Urinalysis \\
+Ketones in Urine & 25.6\% & Urinalysis \\
+WBC in Urine & 25.4\% & Urinalysis \\
+Ipsilateral Rebound & 20.8\% & Clinical \\
+Neutrophil Percentage & 13.2\% & Laboratory \\
+Clinical Scores & 6.6\% & Scoring \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The overall missing rates are 36.84\% for the all-features dataset and 11.25\% for the no-ultrasound dataset. Notably, some features with high predictive value for our targets also exhibit substantial missingness, presenting a fundamental challenge in maximizing data utilization. This motivates our detailed investigation of missing value imputation strategies in Section~\ref{sec:missing}.
+
+\section{Exploratory Data Analysis}
+\label{sec:eda}
+
+\subsection{Target Variable Distributions}
+
+The three target variables exhibit different class distributions, as visualized in Figure~\ref{fig:target_distributions}. The targets are defined as follows:
+\begin{itemize}
+    \item \textbf{Diagnosis}: Binary classification (appendicitis vs. no appendicitis)
+    \item \textbf{Severity}: Binary classification (complicated vs. uncomplicated)
+    \item \textbf{Management}: Three-class classification (conservative, primary surgical, secondary surgical)
+\end{itemize}
+
+\begin{figure}[htb]
+\centering
+\includegraphics[width=\columnwidth]{target_distributions_no_ultrasound.png}
+\caption{Distribution of the three target variables: Diagnosis, Severity, and Management. The class imbalance varies across targets, with Severity showing the most pronounced imbalance.}
+\label{fig:target_distributions}
+\end{figure}
+
+Figure~\ref{fig:class_balance} provides a detailed view of the class balance for each target, which is crucial for selecting appropriate evaluation metrics.
+
+\begin{figure}[htb]
+\centering
+\includegraphics[width=\columnwidth]{class_balance_no_ultrasound.png}
+\caption{Class balance pie charts for each target variable, showing the proportion of positive and negative cases.}
+\label{fig:class_balance}
+\end{figure}
+
+\subsection{Feature Correlation Analysis}
+
+We conducted comprehensive correlation analysis to understand relationships between features and target variables. Figure~\ref{fig:correlation_heatmap} shows the correlation heatmap for key features. Observing this heatmap, we can first group the features into three classes: namely basic physical indicators(e.g. Age, BMI), commonly used laboratory markers and clinical scores(e.g. WBC Count, CRP, Alvarado Score) and target variables. The top correlation regions can be identified as the intra-group correlations, and the inter-group correlations between laboratory markers/clinical scores and target variables. This aligns well with clinical understanding, as inflammatory markers and clinical scores are primary diagnostic tools for appendicitis, while basic physical indicators, correlating with themselves, have limited direct correlation with disease status.
+
+\begin{figure}[htb]
+\centering
+\includegraphics[width=\columnwidth]{correlation_heatmap_no_ultrasound.png}
+\caption{Correlation heatmap showing relationships between features and target variables. Strong correlations are observed between inflammatory markers and between clinical scores.}
+\label{fig:correlation_heatmap}
+\end{figure}
+
+The analysis revealed several clinically meaningful patterns, as shown in Figure~\ref{fig:top_correlations}:
+
+\begin{figure}[htb]
+\centering
+\includegraphics[width=\columnwidth]{top_correlations_no_ultrasound.png}
+\caption{Top 15 features most correlated with each target variable. The correlations align well with established clinical knowledge.}
+\label{fig:top_correlations}
+\end{figure}
+
+\textbf{Diagnosis Correlations}: The top features correlated with diagnosis include Segmented Neutrophils, Alvarado Score, absence of Peritonitis, and WBC Count. These findings align well with established clinical knowledge, as inflammatory markers and clinical scoring systems are primary diagnostic tools.
+
+\textbf{Management Correlations}: Management decisions show strong correlations with Peritonitis indicators (both local and generalized) and Segmented Neutrophils, reflecting that surgical intervention is often indicated in cases with peritoneal involvement.
+
+\textbf{Severity Correlations}: Severity classification correlates most strongly with CRP (C-Reactive Protein), Segmented Neutrophils, and WBC Count, consistent with the understanding that complicated appendicitis is associated with heightened inflammatory responses.
+
+\subsection{Feature Distribution by Target}
+
+To understand how features differ between classes, we examined box plots of key features grouped by each target. Figure~\ref{fig:features_by_diagnosis}, Figure~\ref{fig:features_by_severity}, and Figure~\ref{fig:features_by_management} show the distribution of numerical features by diagnosis, severity, and management status respectively. Furthermore, The scatter plot matrix of key features against themselves and colored by diagnosis status is provided in Figure~\ref{fig:scatter_matrix}.
+
+\begin{figure}[htb]
+\centering
+\includegraphics[width=\columnwidth]{features_by_diagnosis_no_ultrasound.png}
+\caption{Box plots showing distribution of key features by Diagnosis status. Notable differences are observed in inflammatory markers such as WBC Count and CRP.}
+\label{fig:features_by_diagnosis}
+\end{figure}
+
+\begin{figure}[htb]
+\centering
+\includegraphics[width=\columnwidth]{features_by_severity_no_ultrasound.png}
+\caption{Box plots showing distribution of key features by Severity status.}
+\label{fig:features_by_severity}
+\end{figure}
+
+\begin{figure}[htb]
+\centering
+\includegraphics[width=\columnwidth]{features_by_management_no_ultrasound.png}
+\caption{Box plots showing distribution of key features by Management status.}
+\label{fig:features_by_management}
+\end{figure}
+
+\begin{figure}[htb]
+\centering
+\includegraphics[width=\columnwidth]{scatter_matrix_no_ultrasound.png}
+\caption{Scatter plot matrix of key features colored by Diagnosis status.}
+\label{fig:scatter_matrix}
+\end{figure}
+
+\section{Basic Models}
+\label{sec:basic_models}
+
+In this section, we present our baseline machine learning models, feature selection methodology, and hyperparameter tuning procedures. All experiments in this section use the No Ultrasound feature set (45 features) with median imputation as the default missing value strategy.
+
+\subsection{Model Selection and Formulation}
+
+We evaluated seven classification algorithms representing different modeling paradigms:
+
+\begin{itemize}
+    \item \textbf{Logistic Regression}: A linear model that estimates the probability of class membership using the logistic function:
+    \begin{equation}
+    P(y=1|x) = \frac{1}{1 + e^{-(\beta_0 + \beta^T x)}}
+    \end{equation}
+    We use L2 regularization with regularization parameter $C$.
+    
+    \item \textbf{Decision Tree}: A non-parametric model that recursively partitions the feature space based on information gain or Gini impurity.
+    
+    \item \textbf{Random Forest} An ensemble of $B$ decision trees, each trained on a bootstrap sample with random feature subsets. Predictions are made by majority voting:
+    \begin{equation}
+    \hat{y} = \text{mode}\{h_b(x)\}_{b=1}^B
+    \end{equation}
+    
+    \item \textbf{Gradient Boosting} A sequential ensemble that fits trees to the negative gradient of the loss function. At each iteration $m$:
+    \begin{equation}
+    F_m(x) = F_{m-1}(x) + \nu \cdot h_m(x)
+    \end{equation}
+    where $h_m$ is fitted to the residuals $r_{im} = -\frac{\partial L(y_i, F(x_i))}{\partial F(x_i)}$.
+    
+    \item \textbf{HistGradientBoosting}: A variant of gradient boosting that discretizes continuous features into histograms, enabling faster training and \textbf{native support for missing values}.
+    
+    \item \textbf{Support Vector Machine (SVM)}: A kernel-based classifier using the RBF kernel:
+    \begin{equation}
+    K(x_i, x_j) = \exp\left(-\gamma \|x_i - x_j\|^2\right)
+    \end{equation}
+    
+    \item \textbf{K-Nearest Neighbors (KNN)}: An instance-based method that classifies based on the $k$ nearest training samples.
+\end{itemize}
+
+Models that do not natively handle missing values (all except HistGradientBoosting) were paired with median imputation in a scikit-learn pipeline.
+
+\subsection{Experimental Results}
+
+Table~\ref{tab:best_models} summarizes the best performing models for each target variable on the no-ultrasound feature set.
+
+\begin{table}[htb]
+\centering
+\caption{Best model performance on test set (No Ultrasound). Diag. stands for Diagnosis, Man. for Management, Sev. for Severity.}
+\label{tab:best_models}
+\begin{tabular}{@{}llcc@{}}
+\toprule
+Target & Best Model & Accuracy & F1-Score \\
+\midrule
+Diag. & HistGradientBoosting & 75.64\% & 0.6984 \\
+Man. & HistGradientBoosting & 88.46\% & 0.8744 \\
+Sev. & Random Forest & 89.10\% & 0.9377 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The results demonstrate that severity and management prediction are considerably easier tasks than diagnosis, achieving nearly 90\% accuracy. The diagnosis task proves more challenging, likely due to the subtlety of distinguishing appendicitis from other conditions with similar presentations. The detailed results for all models across targets can be found in Appendix~\ref{app: basic_model_results}.
+
+\subsubsection{ROC Curve Analysis}
+
+Figure~\ref{fig:roc_curves} shows the ROC curves for all models on each target variable, providing insight into the trade-off between sensitivity and specificity.
+
+\begin{figure}[htb]
+\centering
+\includegraphics[width=\columnwidth]{roc_curves_Diagnosis.png}
+\caption{ROC curves for all models on the Diagnosis target. HistGradientBoosting and Random Forest achieve the highest AUC values.}
+\label{fig:roc_curves}
+\end{figure}
+
+\begin{figure}[htb]
+\centering
+\includegraphics[width=\columnwidth]{roc_curves_Management.png}
+\caption{ROC curves for all models on the Management target.}
+\label{fig:roc_management}
+\end{figure}
+
+\begin{figure}[htb]
+\centering
+\includegraphics[width=\columnwidth]{roc_curves_Severity.png}
+\caption{ROC curves for all models on the Severity target.}
+\label{fig:roc_severity}
+\end{figure}
+
+\subsubsection{Confusion Matrix Analysis}
+
+The confusion matrices in Figure~\ref{fig:confusion_matrices} reveal the types of errors made by our best models. However, it is worth noting that due to class imbalance, accuracy alone may not fully capture model performance. For instance, in the Severity task, the model achieves high accuracy partly due to the predominance of uncomplicated cases.
+
+\begin{figure}[htb]
+\centering
+\includegraphics[width=\columnwidth]{confusion_matrix_Diagnosis.png}
+\caption{Confusion matrix for the best model on Diagnosis prediction.}
+\label{fig:confusion_matrices}
+\end{figure}
+
+\begin{figure}[htb]
+\centering
+\includegraphics[width=\columnwidth]{confusion_matrix_Management.png}
+\caption{Confusion matrix for the best model on Management prediction.}
+\label{fig:confusion_management}
+\end{figure}
+
+\begin{figure}[htb]
+\centering
+\includegraphics[width=\columnwidth]{confusion_matrix_Severity.png}
+\caption{Confusion matrix for the best model on Severity prediction.}
+\label{fig:confusion_severity}
+\end{figure}
+
+\subsubsection{Overfitting Analysis}
+
+We monitored the gap between training and test performance to detect overfitting. Table~\ref{tab:overfitting} summarizes the overfitting analysis for the Diagnosis target.
+
+\begin{table}[htb]
+\centering
+\caption{Train vs Test comparison for Diagnosis (Overfitting Analysis)}
+\label{tab:overfitting}
+\begin{tabular}{@{}lccl@{}}
+\toprule
+Model & Train Acc & Test Acc & Gap \\
+\midrule
+Logistic Reg. & 0.753 & 0.750 & +0.003 \\
+Random Forest & 1.000 & 0.756 & +0.244 \\
+Gradient Boost & 0.938 & 0.744 & +0.194 \\
+HistGradBoost & 1.000 & 0.756 & +0.244 \\
+SVM & 0.853 & 0.756 & +0.096 \\
+KNN & 0.772 & 0.712 & +0.061 \\
+Decision Tree & 1.000 & 0.705 & +0.295 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+While tree-based models show significant overfitting on training data, they still achieve the best test performance, suggesting that their capacity to capture complex patterns outweighs the overfitting risk for this dataset size.
+
+\subsection{Feature Selection}
+\label{subsec:feature_selection}
+
+To reduce model complexity and potentially improve generalization, we implemented a two-stage stepwise feature selection procedure:
+
+\textbf{Stage 1 - Forward Selection}: Starting from an empty feature set, we iteratively added the feature that most improved cross-validation performance, stopping at 15 features.
+
+\textbf{Stage 2 - Backward Elimination}: From the 15 forward-selected features, we iteratively removed the least important features, arriving at a final set of 10 features per target. Table~\ref{tab:selected_features} presents the selected features for each target variable. The full selected feature sets are provided in Appendix~\ref{app:feature_selection}.
+
+\begin{table}[htb]
+\centering
+\caption{Selected features after forward-backward selection}
+\label{tab:selected_features}
+\begin{tabular}{@{}lp{5.5cm}@{}}
+\toprule
+Target & Selected Features (10) \\
+\midrule
+Diagnosis & BMI, Sex, Lower Right Abd Pain, Loss of Appetite, WBC Count, RBC Count, Ketones in Urine (+, ++), Peritonitis (generalized, no) \\
+\midrule
+Management & Age, BMI, Coughing Pain, Ketones in Urine (++, +++, no), WBC in Urine (no), CRP, Peritonitis (no), Psoas Sign \\
+\midrule
+Severity & BMI, Sex, Contralateral Rebound Tenderness, Nausea, Segmented Neutrophils, Ketones in Urine (++, +++, no), RBC in Urine (+), CRP \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsubsection{Impact of Feature Selection}
+
+Comparing models trained on full features versus selected features revealed mixed results. Figure~\ref{fig:roc_selected} and Figure~\ref{fig:roc_full} show the ROC curves for diagnosis models trained on selected features and full features respectively. One can observe that the performance remains comparable, indicating that the selected features capture most of the predictive signal, while significantly reducing dimensionality.
+
+\begin{figure}[htb]
+\centering
+\includegraphics[width=\columnwidth]{roc_curves_Diagnosis_selected.png}
+\caption{ROC curves for models trained on selected features (Diagnosis). Performance is comparable to full-feature models.}
+\label{fig:roc_selected}
+\end{figure}
+
+\begin{figure}[htb]
+\centering
+\includegraphics[width=\columnwidth]{roc_curves_Diagnosis.png}
+\caption{ROC curves for models trained on full features (Diagnosis).}
+\label{fig:roc_full}
+\end{figure}
+
+While feature selection improved interpretability and reduced computational costs, the performance gains were marginal and sometimes negative, suggesting that the gradient boosting methods effectively perform implicit feature selection.
+
+Table~\ref{tab:feature_selection_impact} provides a detailed comparison of test accuracy with and without feature selection across all models and targets.
+
+\begin{table}[htb]
+\centering
+\caption{Impact of feature selection on test accuracy. Diff is the difference between selected and full feature sets, expressed as a percentage point change.}
+\label{tab:feature_selection_impact}
+\begin{tabular}{@{}llccc@{}}
+\toprule
+Target & Model & Full & Selected & Diff \\
+\midrule
+\multirow{7}{*}{Diag.}
+& Logistic Reg. & 75.00 & 75.64 & +0.64 \\
+& Random Forest & 75.64 & 75.64 & 0.00 \\
+& Gradient Boost & 74.36 & 71.79 & $-$2.56 \\
+& HistGradBoost & 75.64 & 74.36 & $-$1.28 \\
+& SVM & 75.64 & 72.44 & $-$3.21 \\
+& KNN & 71.15 & 69.87 & $-$1.28 \\
+& Decision Tree & 70.51 & 68.59 & $-$1.92 \\
+\midrule
+\multirow{7}{*}{Man.}
+& Logistic Reg. & 79.49 & 78.21 & $-$1.28 \\
+& Random Forest & 83.33 & 80.13 & $-$3.21 \\
+& Gradient Boost & 80.13 & 78.85 & $-$1.28 \\
+& HistGradBoost & 88.46 & 75.00 & $-$13.46 \\
+& SVM & 75.64 & 74.36 & $-$1.28 \\
+& KNN & 71.79 & 71.15 & $-$0.64 \\
+& Decision Tree & 76.28 & 67.31 & $-$8.97 \\
+\midrule
+\multirow{7}{*}{Sev.}
+& Logistic Reg. & 86.54 & 89.10 & +2.56 \\
+& Random Forest & 89.10 & 85.90 & $-$3.21 \\
+& Gradient Boost & 83.97 & 86.54 & +2.56 \\
+& HistGradBoost & 85.26 & 80.13 & $-$5.13 \\
+& SVM & 85.90 & 87.82 & +1.92 \\
+& KNN & 83.97 & 87.18 & +3.21 \\
+& Decision Tree & 86.54 & 78.21 & $-$8.33 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The results reveal that feature selection generally degrades performance for Diagnosis and Management tasks, with the exception of Logistic Regression on Diagnosis (+0.64\%). The Management task shows particularly large drops for HistGradientBoosting ($-$13.46\%) and Decision Tree ($-$8.97\%). Interestingly, the Severity task exhibits more positive outcomes, with Logistic Regression, Gradient Boosting, SVM, and KNN all benefiting from feature selection. This suggests that Severity prediction may rely on a smaller, more focused set of predictive features, while Diagnosis and Management require the full feature space to capture subtle discriminative patterns.
+
+\subsection{Hyperparameter Tuning}
+\label{subsec:tuning}
+
+We performed grid search with 5-fold cross-validation to optimize key hyperparameters for each model. The hyperparameter search spaces were:
+
+\begin{itemize}
+    \item \textbf{Random Forest}: $N_\text{estimators}$ taking values from 10 to 300.
+    \item \textbf{Gradient Boosting}: $N_\text{estimators}$ taking values from 25 to 200.
+    \item \textbf{KNN}: $N_\text{neighbors}$ taking values from 1 to 21.
+    \item \textbf{SVM}: $C$ taking values from 0.01 to 10.
+    \item \textbf{Decision Tree}: \verb|max_depth| taking values from 2 to 15.
+    \item \textbf{Logistic Regression}: $C$ taking values from 0.001 to 100.
+\end{itemize}
+
+Figure~\ref{fig:grid_search_diagnosis}, Figure~\ref{fig:grid_search_management}, and Figure~\ref{fig:grid_search_severity} visualize the grid search results for each target.
+
+\begin{figure}[htb]
+\centering
+\includegraphics[width=\columnwidth]{grid_search_Diagnosis.png}
+\caption{Grid search results for Diagnosis, showing training and validation performance across different hyperparameter values for each model.}
+\label{fig:grid_search_diagnosis}
+\end{figure}
+
+\begin{figure}[htb]
+\centering
+\includegraphics[width=\columnwidth]{grid_search_Management.png}
+\caption{Grid search results for Management, showing training and validation performance across different hyperparameter values for each model.}
+\label{fig:grid_search_management}
+\end{figure}
+
+\begin{figure}[htb]
+\centering
+\includegraphics[width=\columnwidth]{grid_search_Severity.png}
+\caption{Grid search results for Severity, showing training and validation performance across different hyperparameter values for each model.}
+\label{fig:grid_search_severity}
+\end{figure}
+
+\section{Handling Missing Values}
+\label{sec:missing}
+
+Given the substantial missing data in our dataset (11.25\% overall for the no-ultrasound dataset), the choice of imputation strategy can significantly impact model performance. In this section, we systematically compare three imputation approaches.
+
+\subsection{Imputation Methods}
+
+\subsubsection{Median Imputation}
+
+The simplest approach replaces missing values with the feature median:
+\begin{equation}
+\hat{x}_{ij}^{\text{miss}} = \text{median}(\{x_{kj} : x_{kj} \text{ is observed}\})
+\end{equation}
+
+While computationally efficient, this method has notable limitations:
+\begin{itemize}
+    \item Ignores class-specific patterns in the data
+    \item Distorts covariance and correlation structures
+    \item Can introduce bias if data is not missing completely at random (MCAR)
+\end{itemize}
+
+\subsubsection{KNN Imputation}
+
+K-Nearest Neighbors imputation estimates missing values based on the $k$ most similar complete samples:
+\begin{equation}
+\hat{x}_{ij}^{\text{miss}} = \frac{1}{k}\sum_{l \in N_k(i)} x_{lj}
+\end{equation}
+where $N_k(i)$ denotes the $k$ nearest neighbors of sample $i$.
+
+Advantages and limitations:
+\begin{itemize}
+    \item Preserves local data structure
+    \item Computationally expensive for large datasets
+    \item Susceptible to the curse of dimensionality
+    \item Sensitive to the choice of $k$ and distance metric
+\end{itemize}
+
+\subsubsection{MICE (Multiple Imputation by Chained Equations)}
+
+MICE \citep{vanbuuren2011mice} is an iterative approach that models each feature with missing values as a function of other features. The algorithm proceeds as follows:
+
+\begin{enumerate}
+    \item \textbf{Initialization}: Fill missing values with simple imputation (e.g., mean)
+    \item \textbf{Iteration}: For each feature $j$ with missing values:
+    \begin{align}
+        \theta_j^{(t)} &\sim P(\theta_j | X_j^{\text{obs}}, X_{-j}^{(t)}) \\
+        X_j^{\text{miss}(t+1)} &\sim P(X_j^{\text{miss}} | X_{-j}^{(t)}, \theta_j^{(t)})
+    \end{align}
+    \item \textbf{Pooling}: Combine results across multiple imputations:
+    \begin{equation}
+    \bar{\beta} = \frac{1}{m}\sum_{k=1}^m \hat{\beta}_k
+    \end{equation}
+\end{enumerate}
+
+MICE assumes data is \textbf{Missing at Random (MAR)}, meaning the probability of missingness depends only on observed data.
+
+\subsection{Comparative Analysis}
+
+Table~\ref{tab:imputation_comparison} compares imputation strategies across different models and targets.
+
+\begin{table}[htb]
+\centering
+\caption{Imputation strategy comparison (Test Accuracy)}
+\label{tab:imputation_comparison}
+\begin{tabular}{@{}llccc@{}}
+\toprule
+Target & Model & Median & KNN & MICE \\
+\midrule
+\multirow{3}{*}{Diagnosis} 
+& Logistic Reg. & 0.769 & 0.788 & 0.788 \\
+& Gradient Boost & 0.795 & 0.782 & 0.795 \\
+& HistGradBoost & 0.795 & 0.795 & \textbf{0.821} \\
+\midrule
+\multirow{3}{*}{Severity}
+& Logistic Reg. & 0.936 & 0.872 & 0.885 \\
+& Gradient Boost & 0.936 & 0.929 & 0.923 \\
+& HistGradBoost & \textbf{0.942} & 0.936 & 0.929 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Discussion}
+
+Several key observations emerge from our imputation comparison:
+
+\textbf{Task Dependence}: The optimal imputation strategy varies by task. For Diagnosis, MICE with HistGradientBoosting achieves the best result (82.1\%), while for Severity, simple median imputation performs best (94.2\%).
+
+\textbf{Model Robustness}: HistGradientBoosting, which natively handles missing values through its binning strategy, shows consistent performance across imputation methods. This suggests that sophisticated imputation may be less critical when using models with built-in missing value handling.
+
+\textbf{Computational Trade-offs}: MICE is significantly more computationally expensive than median imputation, yet does not consistently outperform simpler methods. For real-time clinical applications, median imputation with HistGradientBoosting offers an attractive balance of simplicity and performance.
+
+\textbf{MAR Assumption}: The limited benefit of MICE may indicate that the MAR assumption is not well-satisfied in our data. Clinical missing data often exhibits patterns related to the severity of the condition (e.g., sicker patients may have more tests performed), violating MAR.
+
+\TODO{Create visualization showing missing data patterns across features: (1) Heatmap of missingness across samples and features, (2) Correlation between missingness indicators and target variables.}
+
+\section{Advanced Methods}
+\label{sec:advanced}
+
+Building upon our basic models, we explore advanced techniques including sophisticated tree-based ensembles and large language model (LLM) approaches.
+
+\subsection{Advanced Tree-Based Methods}
+
+\TODO{Implement and evaluate advanced tree-based methods on the no-ultrasound dataset. Document experimental setup, hyperparameters, and training procedures.}
+
+\subsubsection{Ensemble Variants}
+
+Beyond the standard Random Forest and Gradient Boosting, we investigate:
+
+\begin{itemize}
+    \item \textbf{AdaBoost}: Adaptive boosting that adjusts sample weights based on classification errors, building a strong learner from weighted weak learners.
+    
+    \item \textbf{LightGBM}: Gradient boosting with leaf-wise tree growth strategy, offering faster training and lower memory usage through histogram-based algorithms.
+    
+    \item \textbf{CatBoost}: Gradient boosting with oblivious (symmetric) decision trees, providing built-in handling of categorical features and ordered boosting to reduce prediction shift.
+\end{itemize}
+
+\subsubsection{Neural and Hybrid Approaches}
+
+\begin{itemize}
+    \item \textbf{Neural Decision Forest}: Combines deep neural networks with decision forests, using differentiable decision trees that can be trained end-to-end with gradient descent.
+    
+    \item \textbf{Tree Ensemble Layer (TEL)}: Aggregates multiple tree ensembles through a learned combination layer, enabling ensemble-of-ensembles architectures.
+\end{itemize}
+
+\subsubsection{Meta-Learning Strategies}
+
+\begin{itemize}
+    \item \textbf{TreeNet}: A two-stage approach where the first random forest $rf_1$ is trained, then a second model is trained on $(x, rf_1(x))$ to refine predictions.
+    
+    \item \textbf{MorphBoost}: Combines gradient boosting models of different depths (e.g., depth 2 and depth 4) through voting.
+    
+    \item \textbf{Meta-Tree Boosting}: Ensemble voting across Random Forest, Gradient Boosting, and LightGBM predictions.
+\end{itemize}
+
+\TODO{Add experimental results table for advanced tree methods. Expected best results: Diagnosis -- MorphBoost (Accuracy: 0.7821, F1: 0.7167); Management -- TreeNet (Accuracy: 0.8333, F1: 0.8131); Severity -- Neural Decision Forest (Accuracy: 0.8846, F1: 0.9333). Include confusion matrices and comparison with basic models.}
+
+\subsection{LLM-Based Approaches}
+
+\TODO{Document LLM experimental setup including: model selection (GPT-4, DeepSeek), prompt engineering strategies, API configurations, and evaluation protocols.}
+
+We explore leveraging Large Language Models for clinical prediction through several strategies:
+
+\subsubsection{Direct Prediction}
+
+\begin{itemize}
+    \item \textbf{Zero-shot}: Directly query the LLM with patient features and ask for diagnosis/severity/management predictions without any examples.
+    
+    \item \textbf{Few-shot with Examples}: Provide the LLM with several representative examples before making predictions.
+\end{itemize}
+
+\subsubsection{Iterative Refinement}
+
+\begin{itemize}
+    \item \textbf{Error-based Refinement}: After initial predictions, provide the LLM with its errors and ask it to refine its decision-making.
+    
+    \item \textbf{Hybrid with Base Model}: Combine LLM predictions with traditional model outputs, potentially using the LLM only for difficult cases near decision boundaries.
+\end{itemize}
+
+\subsubsection{LLM as Feature Engineer}
+
+Rather than using LLMs for direct prediction, we can leverage their clinical knowledge to generate new features:
+
+\begin{quote}
+``Based only on these features and your clinical knowledge (and not on the true labels), decide three binary labels: \texttt{y\_diagnosis}, \texttt{y\_severity}, \texttt{y\_management}...''
+\end{quote}
+
+These LLM-generated features can then be used as additional inputs to traditional ML models.
+
+\TODO{Add experimental results for LLM-based methods in two tables: (1) Direct LLM prediction results -- Best without base model: Diagnosis (GPT with examples \& refine, Acc: 0.7115, F1: 0.6667), Management (DeepSeek with examples \& refine \& base, Acc: 0.7500, F1: 0.7572), Severity (GPT with examples \& refine, Acc: 0.8141, F1: 0.8845). (2) Results with LLM-generated features from DeepSeek: Diagnosis (DT-GFN, Acc: 0.7821, F1: 0.7385), Management (TEL, Acc: 0.8333, F1: 0.8148), Severity (TEL, Acc: 0.8846, F1: 0.9328).}
+
+\section{Conclusions and Future Work}
+\label{sec:conclusion}
+
+\subsection{Summary}
+
+In this study, we developed and evaluated machine learning models for pediatric appendicitis prediction using the Regensburg Pediatric Appendicitis Dataset, with a focus on clinically practical scenarios where ultrasound imaging is unavailable. Our key findings include:
+
+\begin{enumerate}
+    \item \textbf{Model Performance}: Using only non-ultrasound features (45 features), HistGradientBoosting and Random Forest emerged as the top performers among basic models, achieving test accuracies of 75.64\% (Diagnosis), 88.46\% (Management), and 89.10\% (Severity).
+    
+    \item \textbf{Clinical Relevance}: The most predictive features align with established clinical knowledge, including inflammatory markers (WBC, CRP, Neutrophils), clinical scores (Alvarado, PAS), and physical examination findings (Peritonitis signs).
+    
+    \item \textbf{Missing Data Handling}: While MICE provides a principled approach to imputation, simpler methods like median imputation can perform comparably when paired with robust models like HistGradientBoosting that handle feature interactions effectively. The optimal imputation strategy is task-dependent.
+    
+    \item \textbf{Feature Selection}: Stepwise selection identified compact feature sets (10 features per target) that maintain competitive performance while improving interpretability.
+    
+    \item \textbf{Clinical Applicability}: By focusing exclusively on non-ultrasound features, our models remain applicable in clinical settings where imaging is unavailable, such as resource-limited environments or time-critical triage situations.
+    \item \TODO{Add summary points for advanced methods and LLM approaches once results are finalized.}
+\end{enumerate}
+
+\subsection{Future Directions}
+
+Future work could continue to explore enhancing the predictive performance and utilization of machine learning models for pediatric appendicitis, especially in high data missingness scenarios. One can also continue to explore more explainable models and interpretability techniques to facilitate clinical adoption. We have not been able to fully explore the LLM-based methods, and this remains a promising avenue for future research. One can continue to refine the prompt engineering strategies, experiment with extensive LLM providers and architectures, and investigate more sophisticated methods of combining LLMs with traditional ML approaches. 
+
+\section*{Contributions}
+The detailed contribution of each team member is as follows:
+\begin{itemize}
+    \item \textbf{Zitong Wang}: Data preprocessing, exploratory data analysis, implementation and experiment of basic models, and the general write-up of the framework. Specificly Section~\ref{sec:preprocessing}, Section~\ref{sec:eda} and Section~\ref{sec:basic_models}.
+    \item \textbf{Wen Yuan}: \TODO{TBD}
+    \item \textbf{Jingxing Zhou}: \TODO{TBD}
+\end{itemize}
 
 \section*{Software and Data}
 
-TBD
+The analysis and training of models were conducted using Python with mainly scikit-learn \citep{scikit-learn}. The Regensburg Pediatric Appendicitis Dataset is publicly available through the UCI Machine Learning Repository \citep{marcinkevics2023regensburg}. Code and processed data are available in the supplementary materials.
+
+\TODO{reorganize the code and provide a README file with instructions for reproducing experiments. Add the code to the supplementary materials when submitting the report.}
 
 \section*{Acknowledgements}
 
-TBD
-
-\section*{Impact Statement}
-
-This paper presents work whose goal is to advance the field of Machine
-Learning. There are many potential societal consequences of our work, none
-which we feel must be specifically highlighted here.
-
-% In the unusual situation where you want a paper to appear in the
-% references without citing it in the main text, use \nocite
-\nocite{langley00}
+We thank the course instructor Ruibin Xi and teaching assistant Siyi Wu of the 2025 Fall Statistical Learning course at Peking University for their guidance. We also acknowledge the creators of the Regensburg Pediatric Appendicitis Dataset for making this valuable clinical data publicly available.
 
 \bibliography{report}
 \bibliographystyle{icml2026}
@@ -105,16 +735,116 @@ which we feel must be specifically highlighted here.
 \newpage
 \appendix
 \onecolumn
-\section{You \emph{can} have an appendix here.}
+\section{Additional Experimental Details}
+\label{app:details}
 
-You can have as much text here as you want. The main body must be at most $8$
-pages long. For the final version, one more page can be added. If you want, you
-can use an appendix like this one.
+\subsection{Complete Model Results}
+\label{app: basic_model_results}
 
-The $\mathtt{\backslash onecolumn}$ command above can be kept in place if you
-prefer a one-column appendix, or can be removed if you prefer a two-column
-appendix.  Apart from this possible change, the style (font size, spacing,
-margins, page numbering, etc.) should be kept the same as the main body.
+Table~\ref{tab:full_results} presents the complete performance metrics for all model-target combinations on the no-ultrasound dataset with median imputation.
+
+\begin{table}[htb]
+\centering
+\caption{Complete model performance on test set (No Ultrasound features, Median Imputation)}
+\label{tab:full_results}
+\begin{tabular}{@{}llcccccc@{}}
+\toprule
+Target & Model & Train Acc & Test Acc & Train F1 & Test F1 & Train AUC & Test AUC \\
+\midrule
+\multirow{7}{*}{Diagnosis}
+& Logistic Regression & 0.753 & 0.750 & 0.691 & 0.688 & 0.832 & 0.833 \\
+& Decision Tree & 1.000 & 0.705 & 1.000 & 0.652 & 1.000 & 0.701 \\
+& Random Forest & 1.000 & 0.756 & 1.000 & 0.678 & 1.000 & 0.848 \\
+& Gradient Boosting & 0.938 & 0.744 & 0.922 & 0.683 & 0.984 & 0.807 \\
+& HistGradientBoosting & 1.000 & 0.756 & 1.000 & 0.698 & 1.000 & 0.866 \\
+& SVM & 0.853 & 0.756 & 0.815 & 0.683 & 0.927 & 0.801 \\
+& KNN & 0.772 & 0.712 & 0.707 & 0.622 & 0.864 & 0.742 \\
+\midrule
+\multirow{7}{*}{Management}
+& Logistic Regression & 0.833 & 0.795 & 0.820 & 0.776 & 0.911 & 0.848 \\
+& Decision Tree & 1.000 & 0.763 & 1.000 & 0.756 & 1.000 & 0.763 \\
+& Random Forest & 1.000 & 0.833 & 1.000 & 0.813 & 1.000 & 0.899 \\
+& Gradient Boosting & 0.976 & 0.801 & 0.976 & 0.781 & 1.000 & 0.887 \\
+& HistGradientBoosting & 1.000 & 0.885 & 1.000 & 0.874 & 1.000 & 0.943 \\
+& SVM & 0.872 & 0.756 & 0.856 & 0.734 & 0.966 & 0.874 \\
+& KNN & 0.836 & 0.718 & 0.821 & 0.682 & 0.926 & 0.796 \\
+\midrule
+\multirow{7}{*}{Severity}
+& Logistic Regression & 0.904 & 0.865 & 0.945 & 0.923 & 0.933 & 0.864 \\
+& Decision Tree & 1.000 & 0.865 & 1.000 & 0.922 & 1.000 & 0.699 \\
+& Random Forest & 1.000 & 0.891 & 1.000 & 0.938 & 1.000 & 0.888 \\
+& Gradient Boosting & 0.984 & 0.840 & 0.991 & 0.905 & 0.999 & 0.885 \\
+& HistGradientBoosting & 1.000 & 0.853 & 1.000 & 0.913 & 1.000 & 0.899 \\
+& SVM & 0.934 & 0.859 & 0.962 & 0.921 & 0.983 & 0.829 \\
+& KNN & 0.886 & 0.840 & 0.937 & 0.911 & 0.934 & 0.736 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Feature Selection Results}
+\label{app:feature_selection}
+
+Table~\ref{tab:feature_selection_full} shows the features selected through our two-stage forward-backward selection process.
+
+\begin{table}[htb]
+\centering
+\caption{Selected features after forward-backward selection}
+\label{tab:feature_selection_full}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{@{}ccc@{}}
+\toprule
+Target                      & Stage         & Selected Features                                                                                    \\ \midrule
+\multirow{2}{*}{Diagnosis} &
+  Forward (15) &
+  \begin{tabular}[c]{@{}c@{}}BMI, Sex, Lower\_Right\_Abd\_Pain, Loss\_of\_Appetite, WBC\_Count, \\ RBC\_Count, Ketones\_in\_Urine\_+, Ketones\_in\_Urine\_++, Peritonitis\_generalized, \\ Peritonitis\_no, Neutrophil\_Percentage, Nausea, CRP,\end{tabular} \\
+ &
+  Backward (10) &
+  \begin{tabular}[c]{@{}c@{}}BMI, Sex, Lower\_Right\_Abd\_Pain, Loss\_of\_Appetite, WBC\_Count,RBC\_Count, \\ Ketones\_in\_Urine\_+, Ketones\_in\_Urine\_++, Peritonitis\_generalized, Peritonitis\_no\end{tabular} \\ \midrule
+\multirow{2}{*}{Management} & Forward (15)  & Age, BMI, Coughing\_Pain, Ketones\_in\_Urine\_++, Ketones\_in\_Urine\_+++,                           \\
+                            &               & Ketones\_in\_Urine\_no, WBC\_in\_Urine\_no, CRP, Peritonitis\_no, Psoas\_Sign                   \\
+                            & Backward (10) & Age, BMI, Coughing\_Pain, Ketones\_in\_Urine\_++, Ketones\_in\_Urine\_+++,                           \\
+                            &               & Ketones\_in\_Urine\_no, WBC\_in\_Urine\_no, CRP, Peritonitis\_no, Psoas\_Sign                        \\ \midrule
+\multirow{2}{*}{Severity}   & Forward (15)  & BMI, Sex, Contralateral\_Rebound\_Tenderness, Nausea, Segmented\_Neutrophils,                        \\
+                            &               & Ketones\_in\_Urine\_++, Ketones\_in\_Urine\_+++, Ketones\_in\_Urine\_no, RBC\_in\_Urine\_+, CRP \\
+                            & Backward (10) & BMI, Sex, Contralateral\_Rebound\_Tenderness, Nausea, Segmented\_Neutrophils,                        \\
+                            &               & Ketones\_in\_Urine\_++, Ketones\_in\_Urine\_+++, Ketones\_in\_Urine\_no, RBC\_in\_Urine\_+, CRP      \\ \bottomrule
+\end{tabular}%
+}
+\end{table}
+
+\subsection{Data Processing Summary}
+
+\begin{table}[htb]
+\centering
+\caption{Data processing summary statistics}
+\label{tab:data_summary}
+\begin{tabular}{@{}lr@{}}
+\toprule
+Metric & Value \\
+\midrule
+Original samples & 782 \\
+Samples after removing missing targets & 780 \\
+Training samples & 624 (80\%) \\
+Test samples & 156 (20\%) \\
+\midrule
+All Features count & 78 \\
+No Ultrasound Features count & 45 \\
+Ultrasound features excluded & 22 \\
+Other excluded features & 1 (Length\_of\_Stay) \\
+\midrule
+Missing rate (All Features) & 36.84\% \\
+Missing rate (No Ultrasound) & 11.25\% \\
+Missing in training data & 3086 values (10.99\%) \\
+Missing in test data & 787 values (11.21\%) \\
+\midrule
+Models evaluated & 7 \\
+Target variables & 3 \\
+Imputation strategies compared & 3 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
