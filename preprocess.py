@@ -57,6 +57,7 @@ def preprocess_data(df, include_ultrasound=True):
     Args:
         df: DataFrame with raw data
         include_ultrasound: Whether to include ultrasound features
+                           When False, also excludes Length_of_Stay (leaky feature)
     
     Returns:
         X: Feature matrix (numpy array with NaN for missing values)
@@ -72,11 +73,16 @@ def preprocess_data(df, include_ultrasound=True):
             df_work = df_work.drop(columns=[col])
             transformations[col] = "Dropped (free-form text or not useful)"
 
-    # If not including ultrasound, drop those columns
+    # If not including ultrasound, drop those columns AND Length_of_Stay
+    # Length_of_Stay is a "leaky" feature - determined after patient outcome
     if not include_ultrasound:
         for col in ultrasound_columns:
             if col in df_work.columns:
                 df_work = df_work.drop(columns=[col])
+        # Also drop Length_of_Stay as it's a leaky feature
+        if 'Length_of_Stay' in df_work.columns:
+            df_work = df_work.drop(columns=['Length_of_Stay'])
+            transformations['Length_of_Stay'] = "Dropped (leaky feature - determined after outcome)"
 
     # Separate features and targets
     feature_cols = [c for c in df_work.columns if c not in target_columns]

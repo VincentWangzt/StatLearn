@@ -1,0 +1,19 @@
+Target,Model,Parameter,Best_Value,Best_Test_Accuracy
+Diagnosis,Random Forest,n_estimators,25.0,0.7884615384615384
+Diagnosis,KNN,n_neighbors,19.0,0.7243589743589743
+Diagnosis,Gradient Boosting,n_estimators,75.0,0.7628205128205128
+Diagnosis,SVM,C,1.0,0.7564102564102564
+Diagnosis,Decision Tree,max_depth,12.0,0.7243589743589743
+Diagnosis,Logistic Regression,C,0.1,0.7628205128205128
+Management,Random Forest,n_estimators,75.0,0.8333333333333334
+Management,KNN,n_neighbors,19.0,0.7692307692307693
+Management,Gradient Boosting,n_estimators,25.0,0.8012820512820513
+Management,SVM,C,2.0,0.7756410256410257
+Management,Decision Tree,max_depth,5.0,0.8012820512820513
+Management,Logistic Regression,C,0.1,0.8012820512820513
+Severity,Random Forest,n_estimators,50.0,0.8974358974358975
+Severity,KNN,n_neighbors,13.0,0.8589743589743589
+Severity,Gradient Boosting,n_estimators,25.0,0.8653846153846154
+Severity,SVM,C,1.0,0.8589743589743589
+Severity,Decision Tree,max_depth,2.0,0.8717948717948718
+Severity,Logistic Regression,C,0.01,0.8653846153846154

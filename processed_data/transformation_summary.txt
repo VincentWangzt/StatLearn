@@ -7,7 +7,7 @@ OVERVIEW
 ----------------------------------------
 Original data shape: (782, 58)
 Processed data with all features: (780, 78)
-Processed data without ultrasound: (780, 46)
+Processed data without ultrasound: (780, 45)
 Target variables: ['Diagnosis', 'Management', 'Severity']
 
 TRAIN/TEST SPLIT
@@ -83,7 +83,7 @@ Sex: 2 missing (0.3%)
 Age: 1 missing (0.1%)
 
 Total missing in all features data: 22472 cells
-Total missing in no-ultrasound data: 3962 cells
+Total missing in no-ultrasound data: 3958 cells
 
 FEATURE NAMES (All Features)
 ----------------------------------------
@@ -173,47 +173,46 @@ FEATURE NAMES (No Ultrasound)
   3. Sex
   4. Height
   5. Weight
-  6. Length_of_Stay
-  7. Alvarado_Score
-  8. Paedriatic_Appendicitis_Score
-  9. Migratory_Pain
-  10. Lower_Right_Abd_Pain
-  11. Contralateral_Rebound_Tenderness
-  12. Coughing_Pain
-  13. Nausea
-  14. Loss_of_Appetite
-  15. Body_Temperature
-  16. WBC_Count
-  17. Neutrophil_Percentage
-  18. Segmented_Neutrophils
-  19. Neutrophilia
-  20. RBC_Count
-  21. Hemoglobin
-  22. RDW
-  23. Thrombocyte_Count
-  24. Ketones_in_Urine_+
-  25. Ketones_in_Urine_++
-  26. Ketones_in_Urine_+++
-  27. Ketones_in_Urine_no
-  28. RBC_in_Urine_+
-  29. RBC_in_Urine_++
-  30. RBC_in_Urine_+++
-  31. RBC_in_Urine_no
-  32. WBC_in_Urine_+
-  33. WBC_in_Urine_++
-  34. WBC_in_Urine_+++
-  35. WBC_in_Urine_no
-  36. CRP
-  37. Dysuria
-  38. Stool_constipation
-  39. Stool_constipation, diarrhea
-  40. Stool_diarrhea
-  41. Stool_normal
-  42. Peritonitis_generalized
-  43. Peritonitis_local
-  44. Peritonitis_no
-  45. Psoas_Sign
-  46. Ipsilateral_Rebound_Tenderness
+  6. Alvarado_Score
+  7. Paedriatic_Appendicitis_Score
+  8. Migratory_Pain
+  9. Lower_Right_Abd_Pain
+  10. Contralateral_Rebound_Tenderness
+  11. Coughing_Pain
+  12. Nausea
+  13. Loss_of_Appetite
+  14. Body_Temperature
+  15. WBC_Count
+  16. Neutrophil_Percentage
+  17. Segmented_Neutrophils
+  18. Neutrophilia
+  19. RBC_Count
+  20. Hemoglobin
+  21. RDW
+  22. Thrombocyte_Count
+  23. Ketones_in_Urine_+
+  24. Ketones_in_Urine_++
+  25. Ketones_in_Urine_+++
+  26. Ketones_in_Urine_no
+  27. RBC_in_Urine_+
+  28. RBC_in_Urine_++
+  29. RBC_in_Urine_+++
+  30. RBC_in_Urine_no
+  31. WBC_in_Urine_+
+  32. WBC_in_Urine_++
+  33. WBC_in_Urine_+++
+  34. WBC_in_Urine_no
+  35. CRP
+  36. Dysuria
+  37. Stool_constipation
+  38. Stool_constipation, diarrhea
+  39. Stool_diarrhea
+  40. Stool_normal
+  41. Peritonitis_generalized
+  42. Peritonitis_local
+  43. Peritonitis_no
+  44. Psoas_Sign
+  45. Ipsilateral_Rebound_Tenderness
 
 COLUMN TRANSFORMATIONS
 ----------------------------------------
@@ -297,7 +296,7 @@ Ketones_in_Urine:
   One-hot encoding (4 categories). Missing values: 200 (25.6%) - PRESERVED AS NaN
 
 Length_of_Stay:
-  Numerical (kept as-is). Missing values: 4 (0.5%) - PRESERVED AS NaN
+  Dropped (leaky feature - determined after outcome)
 
 Loss_of_Appetite:
   Binary encoding: {'no': 0, 'yes': 1}. Missing values: 10 (1.3%) - PRESERVED AS NaN
