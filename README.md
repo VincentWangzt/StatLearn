@@ -63,6 +63,8 @@ python model_training.py
 Results (CSV files) will be saved in the `models/` directory.
 (Alternatively, you can use `model_training_for_tree_and_LLM.py`, which provides the same functionality but is configured for the tree-based and LLM-based settings. You need to set your api and set your PKU clash port for gpt model.)
 
+To test the imputation effect, you can run `test_knn.py` and `test_mice.py` to compare KNN and MICE imputation methods.
+
 ## Key Results
 The project evaluates models on three tasks:
 1.  **Diagnosis:** Appendicitis vs. No Appendicitis
