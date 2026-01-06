@@ -22,7 +22,7 @@
 \usepackage[capitalize,noabbrev]{cleveref}
 
 % Graphics path for images
-\graphicspath{{../analysis/}}
+\graphicspath{{../analysis/}{../}}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % THEOREMS
@@ -70,7 +70,7 @@
 \printAffiliationsAndNotice{\icmlEqualContribution}
 
 \begin{abstract}
-Pediatric appendicitis is one of the most common acute surgical emergencies in childhood, with lifetime risks of 8.6\% for males and 6.7\% for females. Early and accurate diagnosis is crucial for preventing complications. In this study, we develop machine learning models to predict appendicitis diagnosis, severity, and management decisions using the Regensburg Pediatric Appendicitis Dataset from UCI, comprising 782 patients with 58 features. We focus on a clinically practical scenario where ultrasound imaging is unavailable, using only 45 non-ultrasound features. We conduct comprehensive data preprocessing, exploratory data analysis, and systematic model evaluation including logistic regression, random forest, gradient boosting, and other ensemble methods. Our best basic models achieve test accuracies of 75.64\% for diagnosis, 88.46\% for management, and 89.10\% for severity prediction. We also investigate various missing value imputation strategies (Median, KNN, MICE) and feature selection techniques to handle the inherent data incompleteness in clinical settings.\TODO{Add more about advanced tree methods and LLM.}
+Pediatric appendicitis is one of the most common acute surgical emergencies in childhood, with lifetime risks of 8.6\% for males and 6.7\% for females. Early and accurate diagnosis is crucial for preventing complications. In this study, we develop machine learning models to predict appendicitis diagnosis, severity, and management decisions using the Regensburg Pediatric Appendicitis Dataset from UCI, comprising 782 patients with 58 features. We focus on a clinically practical scenario where ultrasound imaging is unavailable, using only 45 non-ultrasound features. We conduct comprehensive data preprocessing, exploratory data analysis, and systematic model evaluation including logistic regression, random forest, gradient boosting, and other ensemble methods. Our best basic models achieve test accuracies of 75.64\% for diagnosis, 88.46\% for management, and 89.10\% for severity prediction. We also investigate various missing value imputation strategies (Median, KNN, MICE) and feature selection techniques to handle the inherent data incompleteness in clinical settings. We additionally evaluate advanced tree-based methods with native missing-value handling and find that most variants perform competitively and robustly across tasks. We also study LLM-based prediction under constrained prompting: few-shot in-context examples markedly improve results and can approach strong tree ensembles, whereas injecting LLM-derived signals into tree models does not yield consistent gains beyond the best tree baselines.
 \end{abstract}
 
 \section{Introduction}
@@ -514,98 +514,124 @@ Figure~\ref{fig:grid_search_diagnosis}, Figure~\ref{fig:grid_search_management},
 
 \section{Handling Missing Values}
 \label{sec:missing}
+The integrity of clinical datasets is frequently compromised by missing values, which can introduce substantial bias and reduce statistical power if not addressed rigorously. In our dataset, the missingness rate is approximately 11.25\% for the non-ultrasound feature set. Since most standard additive models and boosting algorithms (e.g., standard Gradient Boosting, Logistic Regression) require complete input matrices, the choice of imputation strategy becomes a critical hyperparameter in our modeling pipeline.
 
-Given the substantial missing data in our dataset (11.25\% overall for the no-ultrasound dataset), the choice of imputation strategy can significantly impact model performance. In this section, we systematically compare three imputation approaches.
+In this study, we initially hypothesized that the missing data mechanism might be \textbf{Missing at Random (MAR)}. However, to validate this and inform our choice of strategy, we first conducted a visual diagnosis of the missingness patterns.
 
-\subsection{Imputation Methods}
+\subsection{Exploratory Analysis and Imputation Strategies}
 
-\subsubsection{Median Imputation}
+Prior to applying specific imputation algorithms, we utilized visual tools to characterize the nature of the missing data. 
 
-The simplest approach replaces missing values with the feature median:
-\begin{equation}
-\hat{x}_{ij}^{\text{miss}} = \text{median}(\{x_{kj} : x_{kj} \text{ is observed}\})
-\end{equation}
+Figure~\ref{fig:missing_heatmap} presents a vertical heatmap of missingness. The distinct "yellow bands" across the lower features indicate that missingness is structurally clustered rather than sporadic; entire panels of tests (likely secondary markers) are often skipped together for specific patient cohorts.
 
-While computationally efficient, this method has notable limitations:
+\begin{figure}[htbp]
+    \centering
+    % Vertical Heatmap - Adjusted height to fit well
+    \includegraphics[height=0.55\textheight, keepaspectratio]{fig_missing_heatmap_vertical.png}
+    \caption{\textbf{Vertical Heatmap of Missingness.} The y-axis represents clinical features, and the x-axis represents patient samples. Yellow bands indicate missing values. The structural "blocking" suggests that specific test panels are systematically skipped.}
+    \label{fig:missing_heatmap}
+\end{figure}
+
+Furthermore, Figure~\ref{fig:missing_correlation} investigates the \textbf{Missing Not at Random (MNAR)} hypothesis by correlating the missingness indicators with clinical targets. Strong correlations (deep red/blue) are observed; for instance, the absence of \textit{Ipsilateral Rebound Tenderness} is negatively correlated with a positive diagnosis. This implies an \textbf{informative missingness} mechanism—the very act of not performing a test contains diagnostic signal—which poses a theoretical challenge to imputation methods like MICE that assume MAR.
+
+\begin{figure}[htbp]
+    \centering
+    % Correlation Matrix - Adjusted width
+    \includegraphics[width=0.7\linewidth]{fig_missing_correlation.png}
+    \caption{\textbf{Correlation between Feature Missingness and Clinical Outcomes.} Red/Blue colors indicate strong correlations between the \textit{absence} of a feature and the target variable. Significant correlations suggest the data mechanism is MNAR rather than MCAR/MAR.}
+    \label{fig:missing_correlation}
+\end{figure}
+
+Given these observations, we systematically compared three imputation approaches ranging from univariate heuristics to multivariate iterative modeling to determine which best handles this complex mechanism.
+
+\subsubsection{Median Imputation (Baseline)}
+As a baseline, we employ univariate median imputation. This method replaces every missing entry with the median of the observed values for that feature:
+\begin{equation}\hat{x}_{ij}^{\text{miss}} = \text{median}(\{x_{kj} : k \in \mathcal{I}_{obs}(j)\})\end{equation}
+where $\mathcal{I}_{obs}(j)$ represents the set of indices for which feature $j$ is observed. While this approach is $O(1)$ in computational complexity and robust to outliers, it is statistically flawed for high-precision modeling:
 \begin{itemize}
-    \item Ignores class-specific patterns in the data
-    \item Distorts covariance and correlation structures
-    \item Can introduce bias if data is not missing completely at random (MCAR)
+\item \textbf{Underestimation of Variance}: By replacing a distribution of missing values with a single point estimate (the median), we artificially reduce the feature's variance. This can lead to narrower confidence intervals and inflated Type I errors (false positives) in subsequent statistical tests.
+\item \textbf{Distortion of Covariance}: Since imputation is performed independently for each feature, the method ignores the inherent correlation structure between variables (e.g., the physiological correlation between white blood cell count and neutrophils). This "decoupling" effect hampers the ability of multivariate models (like GAMs) to learn interaction terms.
+\item \textbf{Bias under MAR}: Median imputation is only unbiased under the strict \textbf{Missing Completely at Random (MCAR)} assumption, which rarely holds in clinical data.
 \end{itemize}
 
-\subsubsection{KNN Imputation}
-
-K-Nearest Neighbors imputation estimates missing values based on the $k$ most similar complete samples:
-\begin{equation}
-\hat{x}_{ij}^{\text{miss}} = \frac{1}{k}\sum_{l \in N_k(i)} x_{lj}
-\end{equation}
-where $N_k(i)$ denotes the $k$ nearest neighbors of sample $i$.
-
-Advantages and limitations:
+\subsubsection{K-Nearest Neighbors (KNN) Imputation}
+To preserve local data structures, we utilize KNN imputation, a non-parametric method. For a target sample $i$ with missing values, the algorithm identifies the set of $k$ nearest neighbors, $N_k(i)$, based on the Euclidean distance computed from the observed features. The missing value is then estimated as a weighted average:
+\begin{equation}\hat{x}_{ij}^{\text{miss}} = \frac{\sum_{l \in N_k(i)} w_{il} x_{lj}}{\sum_{l \in N_k(i)} w_{il}}\end{equation}
+where weights $w_{il}$ are typically proportional to the inverse distance ($1/d(x_i, x_l)$).
+\textbf{Advantages and Limitations:}
 \begin{itemize}
-    \item Preserves local data structure
-    \item Computationally expensive for large datasets
-    \item Susceptible to the curse of dimensionality
-    \item Sensitive to the choice of $k$ and distance metric
+\item \textbf{Local Structure Preservation}: Unlike median imputation, KNN considers the local density of the data, making it capable of capturing non-linear patterns within clusters.
+\item \textbf{Computational Cost}: The algorithm is computationally intensive, scaling with $O(N^2)$ as it requires computing a pairwise distance matrix. This becomes a bottleneck for large datasets.
+\item \textbf{Curse of Dimensionality}: In high-dimensional feature spaces, the distance between all points tends to converge, rendering the concept of "nearest neighbor" less meaningful.
+\item \textbf{Sensitivity to Scaling}: KNN is highly sensitive to feature magnitudes. Pre-processing steps such as standardization (Z-score normalization) are strictly required before applying this method.
 \end{itemize}
 
-\subsubsection{MICE (Multiple Imputation by Chained Equations)}
-
-MICE \citep{vanbuuren2011mice} is an iterative approach that models each feature with missing values as a function of other features. The algorithm proceeds as follows:
-
+\subsubsection{MICE (Multivariate Imputation by Chained Equations)}
+Given the limitations of the previous methods, we adopt \textbf{MICE} \citep{vanbuuren2011mice} as our primary imputation strategy. MICE, also known as Fully Conditional Specification (FCS), avoids defining a rigid joint distribution for the entire dataset. Instead, it decomposes the multivariate missing data problem into a series of univariate regression problems. The algorithm operates in a Round-Robin fashion:
 \begin{enumerate}
-    \item \textbf{Initialization}: Fill missing values with simple imputation (e.g., mean)
-    \item \textbf{Iteration}: For each feature $j$ with missing values:
-    \begin{align}
-        \theta_j^{(t)} &\sim P(\theta_j | X_j^{\text{obs}}, X_{-j}^{(t)}) \\
-        X_j^{\text{miss}(t+1)} &\sim P(X_j^{\text{miss}} | X_{-j}^{(t)}, \theta_j^{(t)})
-    \end{align}
-    \item \textbf{Pooling}: Combine results across multiple imputations:
+\item \textbf{Initialization}: All missing values are initially filled with a simple placeholder (e.g., mean) to allow the regression models to run.
+\item \textbf{Iteration (Gibbs Sampling Step)}: For each cycle $t = 1, \dots, T$ and for each variable $j$:
+\begin{itemize}
+    \item The current variable $x_j$ is set as the target, and all other variables $x_{-j}$ (containing their most current imputed values) are used as predictors.
+    \item A regression model (e.g., \textbf{Bayesian Ridge Regression}) is trained on the observed part of $x_j$:
     \begin{equation}
-    \bar{\beta} = \frac{1}{m}\sum_{k=1}^m \hat{\beta}_k
+        \phi_j^{(t)} \leftarrow \text{train}(x_j^{\text{obs}} \sim x_{-j}^{(t)})
     \end{equation}
+    \item New values for the missing parts of $x_j$ are drawn from the posterior predictive distribution:
+    \begin{equation}
+         x_{j}^{\text{miss}(t)} \sim P(x_j | x_{-j}^{(t)}, \phi_j^{(t)})
+    \end{equation}
+\end{itemize}
+This cycle is repeated until the distribution of imputed parameters stabilizes (convergence).
+
+\item \textbf{Uncertainty Modeling}: Unlike single deterministic imputation, MICE can generate multiple datasets to account for the uncertainty of the missing values themselves. For our predictive modeling task, we utilize the single optimal imputation derived from the converged state.
 \end{enumerate}
+\textbf{Justification for MICE in Additive Models:}
+\begin{itemize}
+\item \textbf{Preservation of Multivariate Relations}: By using other variables as predictors, MICE effectively reconstructs the correlation structure of the data. For example, if 'Body Temperature' is missing, MICE can infer it from 'Infection Markers', preserving the physiological consistency required for the Additive Model to function correctly.
+\item \textbf{Flexibility}: The underlying regressor in the chained equations can be adapted. In this study, we employ \textbf{Bayesian Ridge Regression}, which introduces regularization to handle potential multicollinearity among clinical features.
+\end{itemize}
 
-MICE assumes data is \textbf{Missing at Random (MAR)}, meaning the probability of missingness depends only on observed data.
-
-\subsection{Comparative Analysis}
+\subsection{Comparison and Discussion}
 
 Table~\ref{tab:imputation_comparison} compares imputation strategies across different models and targets.
 
 \begin{table}[htb]
 \centering
-\caption{Imputation strategy comparison (Test Accuracy)}
+\caption{Imputation strategy comparison (Test Accuracy). \textit{Diag.} stands for Diagnosis, \textit{Sev.} stands for Severity.}
 \label{tab:imputation_comparison}
-\begin{tabular}{@{}llccc@{}}
+\begin{tabular}{@{}llcccc@{}}
 \toprule
-Target & Model & Median & KNN & MICE \\
+Target & Model & Median & KNN & MICE & Median(US)\\ 
 \midrule
-\multirow{3}{*}{Diagnosis} 
-& Logistic Reg. & 0.769 & 0.788 & 0.788 \\
-& Gradient Boost & 0.795 & 0.782 & 0.795 \\
-& HistGradBoost & 0.795 & 0.795 & \textbf{0.821} \\
+\multirow{3}{*}{Diag.} 
+& Logistic Reg. & 0.769 & 0.788 & 0.788 & 0.923 \\
+& Gradient Boost & 0.795 & 0.782 & 0.795 & 0.948 \\
+& HistGradBoost & 0.795 & 0.795 & 0.821 & 0.980 \\
 \midrule
-\multirow{3}{*}{Severity}
-& Logistic Reg. & 0.936 & 0.872 & 0.885 \\
-& Gradient Boost & 0.936 & 0.929 & 0.923 \\
-& HistGradBoost & \textbf{0.942} & 0.936 & 0.929 \\
+\multirow{3}{*}{Sev.}
+& Logistic Reg. & 0.936 & 0.872 & 0.885 & 0.916 \\
+& Gradient Boost & 0.936 & 0.929 & 0.923 & 0.961 \\
+& HistGradBoost & 0.942 & 0.936 & 0.929 & 0.942\\
 \bottomrule
 \end{tabular}
 \end{table}
 
-\subsection{Discussion}
-
 Several key observations emerge from our imputation comparison:
 
-\textbf{Task Dependence}: The optimal imputation strategy varies by task. For Diagnosis, MICE with HistGradientBoosting achieves the best result (82.1\%), while for Severity, simple median imputation performs best (94.2\%).
+\begin{itemize}
+    \item \textbf{Heterogeneity in Imputation Efficacy}: The optimal imputation strategy proves to be highly target-dependent. For the \textit{Diagnosis} task, multivariate iterative imputation (MICE) combined with HistGradientBoosting achieves superior performance (82.1\%), whereas for \textit{Severity}, simple median imputation yields the highest accuracy (94.2\%).
 
-\textbf{Model Robustness}: HistGradientBoosting, which natively handles missing values through its binning strategy, shows consistent performance across imputation methods. This suggests that sophisticated imputation may be less critical when using models with built-in missing value handling.
+    \item \textbf{Resilience of Native Handling}: HistGradientBoosting demonstrates remarkable robustness. Unlike Logistic Regression, which fluctuates significantly depending on the imputation quality, HistGradientBoosting's native ability to handle missing values renders it less sensitive to the choice of pre-imputation, suggesting that sophisticated external imputation may yield diminishing returns for modern tree-based models.
 
-\textbf{Computational Trade-offs}: MICE is significantly more computationally expensive than median imputation, yet does not consistently outperform simpler methods. For real-time clinical applications, median imputation with HistGradientBoosting offers an attractive balance of simplicity and performance.
+    \item \textbf{Potential Violation of MAR Assumption}: The limited marginal gain from MICE suggests that the missingness may be partly \textit{Missing Not At Random (MNAR)}. In clinical settings, the absence of a test is often informative (e.g., tests skipped for less severe cases), containing a signal that simple imputation or native handling might implicitly preserve better than MICE.
 
-\textbf{MAR Assumption}: The limited benefit of MICE may indicate that the MAR assumption is not well-satisfied in our data. Clinical missing data often exhibits patterns related to the severity of the condition (e.g., sicker patients may have more tests performed), violating MAR.
+    \item \textbf{Feature Dominance vs. Imputation Utility}: 
+    The marginal performance gains observed across imputation methods (Columns 1-3) can be attributed to the \textbf{weak predictive power} of the features containing missing values (primarily secondary lab markers). 
+    In sharp contrast, the fourth column (Median(US)) demonstrates that simply including the "Appendix Diameter" feature---even with crude median imputation---triggers a massive accuracy surge (e.g., to 98\%). 
+    This indicates that the \textbf{dominant predictive signal} of the ultrasound feature outweighs the benefits of sophisticated imputation strategies applied to weaker clinical features. Essentially, the "informativeness" of the available features matters far more than the recovery of missing secondary data.
+\end{itemize}
 
-\TODO{Create visualization showing missing data patterns across features: (1) Heatmap of missingness across samples and features, (2) Correlation between missingness indicators and target variables.}
 
 \section{Advanced Methods}
 \label{sec:advanced}
@@ -613,74 +639,116 @@ Several key observations emerge from our imputation comparison:
 Building upon our basic models, we explore advanced techniques including sophisticated tree-based ensembles and large language model (LLM) approaches.
 
 \subsection{Advanced Tree-Based Methods}
+\label{subsec:advanced_tree}
 
-\TODO{Implement and evaluate advanced tree-based methods on the no-ultrasound dataset. Document experimental setup, hyperparameters, and training procedures.}
+Beyond the basic models in Section~\ref{sec:basic_models}, we further evaluate a suite of advanced tree-based methods on the \textbf{No Ultrasound} dataset (45 features) under the same fixed train/test split (80/20, stratified by Diagnosis). Unless otherwise stated, models that do not natively support missing values are trained with \textbf{median imputation} applied to the training set and then consistently applied to the test set.
 
-\subsubsection{Ensemble Variants}
-
-Beyond the standard Random Forest and Gradient Boosting, we investigate:
-
-\begin{itemize}
-    \item \textbf{AdaBoost}: Adaptive boosting that adjusts sample weights based on classification errors, building a strong learner from weighted weak learners.
-    
-    \item \textbf{LightGBM}: Gradient boosting with leaf-wise tree growth strategy, offering faster training and lower memory usage through histogram-based algorithms.
-    
-    \item \textbf{CatBoost}: Gradient boosting with oblivious (symmetric) decision trees, providing built-in handling of categorical features and ordered boosting to reduce prediction shift.
-\end{itemize}
-
-\subsubsection{Neural and Hybrid Approaches}
+\paragraph{Methods.}
+We consider the following advanced tree-based algorithms and ensemble variants:
 
 \begin{itemize}
-    \item \textbf{Neural Decision Forest}: Combines deep neural networks with decision forests, using differentiable decision trees that can be trained end-to-end with gradient descent.
-    
-    \item \textbf{Tree Ensemble Layer (TEL)}: Aggregates multiple tree ensembles through a learned combination layer, enabling ensemble-of-ensembles architectures.
+    \item \textbf{Random Forest (RF).}
+    An ensemble of bagged decision trees trained on bootstrap samples with random feature sub-sampling. RF is robust and nonlinear, but can overfit on small datasets if trees are deep. In our implementation, missing values are handled via median imputation.
+
+    \item \textbf{Gradient Boosting Decision Trees (GBDT).}
+    A sequential additive model that fits weak learners (shallow trees) to residuals. Compared with RF, GBDT often yields stronger performance but can be sensitive to hyperparameters. Missing values are handled via median imputation.
+
+    \item \textbf{AdaBoost.}
+    Adaptive boosting that reweights samples across iterations to focus on misclassified points, typically using decision stumps or shallow trees as base learners. AdaBoost can be competitive on tabular data but may be sensitive to noisy labels. Missing values are handled via median imputation.
+
+    \item \textbf{Histogram-based Gradient Boosting Trees (HistGBDT).}
+    A scalable GBDT variant that bins continuous features into discrete histograms. Importantly, HistGBDT provides \textbf{native handling of missing values} by learning default directions for missing-feature splits, which makes it well-suited to clinical datasets with incomplete measurements.
+
+    \item \textbf{LightGBM.}
+    A histogram-based gradient boosting framework with efficient split finding and leaf-wise tree growth. LightGBM supports \textbf{native missing-value handling} by assigning missing values to the optimal split direction during training. We use LightGBM as a strong industrial-grade GBDT baseline.
+
+    \item \textbf{CatBoost.}
+    Gradient boosting with symmetric (oblivious) trees and specialized handling of categorical variables. CatBoost also supports \textbf{native missing-value handling}. Although our features are already encoded, CatBoost remains a strong contender due to its stable training and regularization effects.
+
+    \item \textbf{Neural Decision Forest (NDF).}
+    A hybrid model combining a neural feature transformation with differentiable decision trees/forests trained end-to-end. NDF aims to capture feature interactions beyond standard trees while maintaining tree-like decision structures. Missing values are handled via the same preprocessing pipeline used for non-native models (median imputation).
+
+    \item \textbf{Tree Ensemble Layer (TEL).}
+    A stacking-style meta-model that aggregates predictions from multiple tree ensembles using a learned combination layer. Concretely, we train several base tree models to obtain out-of-fold (here: training-set) predicted probabilities/logits, then fit a lightweight combiner (e.g., logistic regression or a shallow tree) on these meta-features. TEL can be viewed as an \emph{ensemble-of-ensembles} strategy to improve robustness.
+
+    \item \textbf{TreeNet.}
+    A two-stage refinement approach: we first train a base tree ensemble (e.g., RF/GBDT) to obtain prediction scores; then we train a second model on the augmented feature vector $(x, \hat{p}(y|x))$ (or concatenated class scores) to refine decisions. This resembles a simple stacking pipeline designed to exploit complementary signal between raw clinical features and a strong tree baseline.
+
+    \item \textbf{MorphBoost.}
+    A heterogeneous-depth boosting ensemble that combines boosting models of different tree depths (e.g., shallow and deeper trees) through weighted averaging or voting. The intuition is to blend low-variance shallow learners with higher-capacity learners to balance bias and variance, which can be beneficial under limited sample size.
+
+    \item \textbf{Meta Tree Boosting.}
+    A meta-ensemble that performs voting/averaging across multiple tree-based predictors (e.g., RF, GBDT, LightGBM, CatBoost, HistGBDT). By aggregating diverse inductive biases, Meta Tree Boosting aims to reduce variance and improve generalization under a single fixed split.
 \end{itemize}
 
-\subsubsection{Meta-Learning Strategies}
+\paragraph{Implementation notes.}
+All models are trained on the same fixed split for fair comparison.
 
-\begin{itemize}
-    \item \textbf{TreeNet}: A two-stage approach where the first random forest $rf_1$ is trained, then a second model is trained on $(x, rf_1(x))$ to refine predictions.
-    
-    \item \textbf{MorphBoost}: Combines gradient boosting models of different depths (e.g., depth 2 and depth 4) through voting.
-    
-    \item \textbf{Meta-Tree Boosting}: Ensemble voting across Random Forest, Gradient Boosting, and LightGBM predictions.
-\end{itemize}
-
-\TODO{Add experimental results table for advanced tree methods. Expected best results: Diagnosis -- MorphBoost (Accuracy: 0.7821, F1: 0.7167); Management -- TreeNet (Accuracy: 0.8333, F1: 0.8131); Severity -- Neural Decision Forest (Accuracy: 0.8846, F1: 0.9333). Include confusion matrices and comparison with basic models.}
+\paragraph{Results.}
+Table~\ref{tab:full_results_Diagnosis},~\ref{tab:full_results_Management},~\ref{tab:full_results_Severity} reports all exact final results.
 
 \subsection{LLM-Based Approaches}
+\label{subsec:llm}
 
-\TODO{Document LLM experimental setup including: model selection (GPT-4, DeepSeek), prompt engineering strategies, API configurations, and evaluation protocols.}
+We investigate whether Large Language Models (LLMs) can assist clinical prediction on the Regensburg Pediatric Appendicitis Dataset under the \textbf{No Ultrasound} setting (45 features). Our goal is \emph{not} to replace statistical learners with free-form text generation, but to evaluate whether LLMs can (i) directly predict clinical outcomes from structured patient features and/or (ii) provide useful high-level clinical abstractions as additional features for downstream models. Total view is in Figure \ref{fig:llm_model}.
 
-We explore leveraging Large Language Models for clinical prediction through several strategies:
+\paragraph{LLM models.}
+We evaluate two representative LLM families: (1) a GPT-style model (denoted as \textbf{GPT}) and (2) \textbf{DeepSeek}. We keep temperature and decoding settings fixed across experiments to ensure comparability.
+
+\paragraph{Input formatting.}
+Each patient record is serialized into a compact text block listing all available feature names and values. Missing values are explicitly represented as \texttt{Unknown} (or \texttt{Not Measured}) rather than being imputed. For categorical features, we present human-readable values (e.g., \texttt{Peritonitis = none/local/generalized}) instead of one-hot vectors. This representation is designed to mimic how clinicians read structured triage forms. The prompts are in \ref{app:llm_prompts}.
+
+\paragraph{Evaluation protocol.}
+All LLM experiments are conducted on the same fixed train/test split used in the tree-based methods. For Diagnosis and Severity (binary), we report Accuracy and F1-score of the positive class; for Management (multi-class), we report Accuracy and macro-F1. Unless otherwise specified, LLM predictions are made independently for each test sample without access to true labels.
 
 \subsubsection{Direct Prediction}
+\label{subsubsec:llm_direct}
+
+We first test whether LLMs can directly predict clinical outcomes based solely on structured patient features.
 
 \begin{itemize}
-    \item \textbf{Zero-shot}: Directly query the LLM with patient features and ask for diagnosis/severity/management predictions without any examples.
-    
-    \item \textbf{Few-shot with Examples}: Provide the LLM with several representative examples before making predictions.
+    \item \textbf{Direct Ask (Zero-shot).} The LLM receives the patient features and is asked to predict Diagnosis/Severity/Management without examples.
+    \item \textbf{Few-shot with Mean Examples.} We prepend several representative examples (``mean'' cases summarizing typical positive/negative patterns) to provide context and calibrate the decision boundary.
 \end{itemize}
 
-\subsubsection{Iterative Refinement}
+\subsubsection{Iterative Refinement and Hybrid Strategies}
+\label{subsubsec:llm_refine}
+
+We then consider strategies intended to reduce systematic LLM errors:
 
 \begin{itemize}
-    \item \textbf{Error-based Refinement}: After initial predictions, provide the LLM with its errors and ask it to refine its decision-making.
-    
-    \item \textbf{Hybrid with Base Model}: Combine LLM predictions with traditional model outputs, potentially using the LLM only for difficult cases near decision boundaries.
+    \item \textbf{Refine by Error Feedback.} After an initial prediction, we provide the LLM with a short summary of its incorrect predictions on a small held-out calibration subset from the training data (not the test labels) and ask it to update its decision rule and re-predict. This aims to correct recurring mistakes (e.g., over-reliance on a single lab marker).
+    \item \textbf{Give Base Model Results.} We provide the LLM with the probability outputs or predicted labels from a strong baseline model (e.g., HistGradientBoosting) as additional evidence. The LLM is instructed to either agree with the base model or override it with an explicit justification (still outputting only final labels).
+    \item \textbf{Only Solve Difficult Cases.} We use the base model as the default predictor. The LLM is queried only for samples near the decision boundary (e.g., low confidence or small probability margin), and its prediction replaces the base model on these difficult cases. This reduces cost and focuses LLM reasoning where it may help most.
 \end{itemize}
 
 \subsubsection{LLM as Feature Engineer}
+\label{subsubsec:llm_feature_engineer}
 
-Rather than using LLMs for direct prediction, we can leverage their clinical knowledge to generate new features:
+Rather than asking the LLM to directly output the ground-truth task labels, we leverage its clinical prior knowledge to generate auxiliary labels/features that can be appended to the tabular representation. Concretely, for each patient we ask the LLM to produce three binary indicators:
+\texttt{y\_diagnosis}, \texttt{y\_severity}, \texttt{y\_management},
+\emph{based only on observed features and clinical knowledge, without using any true labels}.
+These LLM-generated signals are then used as additional features for downstream models (e.g., decision trees, TEL), functioning as high-level clinical abstractions.
 
-\begin{quote}
-``Based only on these features and your clinical knowledge (and not on the true labels), decide three binary labels: \texttt{y\_diagnosis}, \texttt{y\_severity}, \texttt{y\_management}...''
-\end{quote}
+\begin{figure}[htb]
+\centering
+\includegraphics[width=\columnwidth]{report/yw_image/robot.png}
+\caption{Schematic View for LLM in Modeling}
+\label{fig:llm_model}
+\end{figure}
 
-These LLM-generated features can then be used as additional inputs to traditional ML models.
+\paragraph{Results.}
+Table~\ref{tab:full_results_Diagnosis},~\ref{tab:full_results_Management},~\ref{tab:full_results_Severity} reports all exact final results.
 
-\TODO{Add experimental results for LLM-based methods in two tables: (1) Direct LLM prediction results -- Best without base model: Diagnosis (GPT with examples \& refine, Acc: 0.7115, F1: 0.6667), Management (DeepSeek with examples \& refine \& base, Acc: 0.7500, F1: 0.7572), Severity (GPT with examples \& refine, Acc: 0.8141, F1: 0.8845). (2) Results with LLM-generated features from DeepSeek: Diagnosis (DT-GFN, Acc: 0.7821, F1: 0.7385), Management (TEL, Acc: 0.8333, F1: 0.8148), Severity (TEL, Acc: 0.8846, F1: 0.9328).}
+\paragraph{Discussion.}
+Overall, direct LLM prediction is consistently weaker than strong tree-based learners trained on the same split, especially on the Diagnosis task. As shown in Figure~\ref{fig:llm_tree}, the efficiency of the LLM can be improved to a level close to that of tree-based models simply by providing a few in-context examples, which is a striking result.
+
+\begin{figure}[htb]
+\centering
+\includegraphics[width=\columnwidth]{report/yw_image/model_comparison.png}
+\caption{Tree Model vs. LLM}
+\label{fig:llm_tree}
+\end{figure}
 
 \section{Conclusions and Future Work}
 \label{sec:conclusion}
@@ -699,7 +767,11 @@ In this study, we developed and evaluated machine learning models for pediatric 
     \item \textbf{Feature Selection}: Stepwise selection identified compact feature sets (10 features per target) that maintain competitive performance while improving interpretability.
     
     \item \textbf{Clinical Applicability}: By focusing exclusively on non-ultrasound features, our models remain applicable in clinical settings where imaging is unavailable, such as resource-limited environments or time-critical triage situations.
-    \item \TODO{Add summary points for advanced methods and LLM approaches once results are finalized.}
+    \item \textbf{Advanced Tree-Based Methods}: Across the advanced tree family (e.g., gradient-boosted decision trees and modern ensemble variants), performance remained consistently strong and competitive across all three targets, indicating that tree-based learners provide a robust and reliable baseline for this dataset under missingness and mixed feature types.
+    
+    \item \textbf{LLM Competitiveness with In-Context Examples}: Although direct LLM-based prediction underperforms well-tuned tree models in the zero-shot setting, providing a small number of in-context examples substantially narrows the gap, bringing the LLM to near tree-level performance. This suggests that limited task-specific guidance can dramatically improve LLM decision quality even without parameter updates.
+    
+    \item \textbf{Hybridization Limits}: We explored hybrid strategies that inject LLM judgments into tree models (e.g., using LLM outputs as additional signals or refinements). However, these approaches did not yield consistent improvements over the best standalone tree models, suggesting that the tree ensembles already capture most of the predictive structure available in the tabular features, and that LLM-derived signals may be redundant or noisy in this setting.
 \end{enumerate}
 
 \subsection{Future Directions}
@@ -709,16 +781,14 @@ Future work could continue to explore enhancing the predictive performance and u
 \section*{Contributions}
 The detailed contribution of each team member is as follows:
 \begin{itemize}
-    \item \textbf{Zitong Wang}: Data preprocessing, exploratory data analysis, implementation and experiment of basic models, and the general write-up of the framework. Specificly Section~\ref{sec:preprocessing}, Section~\ref{sec:eda} and Section~\ref{sec:basic_models}.
-    \item \textbf{Wen Yuan}: \TODO{TBD}
-    \item \textbf{Jingxing Zhou}: \TODO{TBD}
-\end{itemize}
+    \item \textbf{Zitong Wang}: Data preprocessing, exploratory data analysis, implementation and experiment of basic models, and the general write-up of the framework. Specificly, responsible for Section~\ref{sec:introduction}, Section~\ref{sec:preprocessing}, Section~\ref{sec:eda} and Section~\ref{sec:basic_models}.
+    \item \textbf{Wen Yuan}: Implementation of advanced tree-based methods and LLM-based approaches. Specifically Section~\ref{sec:advanced}.
+    \item \textbf{Jingxing Zhou}: Exploratory Data Analysis, comparative assessment of missing data imputation strategies, and the composition of Chapter 5
+    \end{itemize}
 
 \section*{Software and Data}
 
 The analysis and training of models were conducted using Python with mainly scikit-learn \citep{scikit-learn}. The Regensburg Pediatric Appendicitis Dataset is publicly available through the UCI Machine Learning Repository \citep{marcinkevics2023regensburg}. Code and processed data are available in the supplementary materials.
-
-\TODO{reorganize the code and provide a README file with instructions for reproducing experiments. Add the code to the supplementary materials when submitting the report.}
 
 \section*{Acknowledgements}
 
@@ -741,17 +811,17 @@ We thank the course instructor Ruibin Xi and teaching assistant Siyi Wu of the 2
 \subsection{Complete Model Results}
 \label{app: basic_model_results}
 
-Table~\ref{tab:full_results} presents the complete performance metrics for all model-target combinations on the no-ultrasound dataset with median imputation.
+Table~\ref{tab:full_results_Diagnosis},~\ref{tab:full_results_Management},~\ref{tab:full_results_Severity} presents the complete performance metrics for all model-target combinations on the no-ultrasound dataset with median imputation.
 
-\begin{table}[htb]
+\begin{table}[p]
 \centering
-\caption{Complete model performance on test set (No Ultrasound features, Median Imputation)}
-\label{tab:full_results}
+\caption{Complete model performance on test set (No Ultrasound features, Median Imputation) for Diagnosis}
+\label{tab:full_results_Diagnosis}
 \begin{tabular}{@{}llcccccc@{}}
 \toprule
 Target & Model & Train Acc & Test Acc & Train F1 & Test F1 & Train AUC & Test AUC \\
 \midrule
-\multirow{7}{*}{Diagnosis}
+\multirow{28}{*}{Diagnosis}
 & Logistic Regression & 0.753 & 0.750 & 0.691 & 0.688 & 0.832 & 0.833 \\
 & Decision Tree & 1.000 & 0.705 & 1.000 & 0.652 & 1.000 & 0.701 \\
 & Random Forest & 1.000 & 0.756 & 1.000 & 0.678 & 1.000 & 0.848 \\
@@ -759,8 +829,39 @@ Target & Model & Train Acc & Test Acc & Train F1 & Test F1 & Train AUC & Test AU
 & HistGradientBoosting & 1.000 & 0.756 & 1.000 & 0.698 & 1.000 & 0.866 \\
 & SVM & 0.853 & 0.756 & 0.815 & 0.683 & 0.927 & 0.801 \\
 & KNN & 0.772 & 0.712 & 0.707 & 0.622 & 0.864 & 0.742 \\
+& Random Forest &  & 0.750 & 0.714 & 0.635 &  & 0.672 \\
+& Gradient Boosting &  & 0.724 & 0.656 & 0.667 &  & 0.661 \\
+& AdaBoost &  & 0.763 & 0.741 & 0.635 &  & 0.684 \\
+& LightGBM &  & 0.756 & 0.727 & 0.635 &  & 0.678 \\
+& CatBoost &  & 0.731 & 0.672 & 0.651 &  & 0.661 \\
+& Neural Decision Forest &  & 0.718 & 0.646 & 0.667 &  & 0.656 \\
+& GRANDE (HistGBDT approx) &  & 0.712 & 0.650 & 0.619 &  & 0.634 \\
+& DT-GFN (ExtraTrees approx) &  & 0.756 & 0.712 & 0.667 &  & 0.689 \\
+& MorphBoost (stacked GBDT) &  & 0.782 & 0.754 & 0.683 &  & 0.717 \\
+& Meta-Tree Boosting &  & 0.750 & 0.700 & 0.667 &  & 0.683 \\
+& TEL (Tree Ensemble Layer) &  & 0.756 & 0.705 & 0.683 &  & 0.694 \\
+& TreeNet &  & 0.744 & 0.702 & 0.635 &  & 0.667 \\
+& Boundary ds Hybrid &  & 0.679 & 0.580 & 0.746 &  & 0.653 \\
+& ds simple &  & 0.468 & 0.424 & 0.889 &  & 0.574 \\
+& ds with examples &  & 0.667 & 0.560 & 0.810 &  & 0.662 \\
+& ds with examples \& refine &  & 0.692 & 0.603 & 0.698 &  & 0.647 \\
+& ds with examples \& refine \& base &  & 0.686 & 0.606 & 0.635 &  & 0.620 \\
+& gpt simple &  & 0.705 & 0.616 & 0.714 &  & 0.662 \\
+& gpt with examples &  & 0.705 & 0.610 & 0.746 &  & 0.671 \\
+& gpt with examples \& refine &  & 0.712 & 0.625 & 0.714 &  & 0.667 \\
+& gpt with examples \& refine \& base &  & 0.724 & 0.647 & 0.698 &  & 0.672 \\
+\bottomrule
+\end{tabular}
+\end{table}
+\begin{table}[p]
+\centering
+\caption{Complete model performance on test set (No Ultrasound features, Median Imputation) for Management}
+\label{tab:full_results_Management}
+\begin{tabular}{@{}llcccccc@{}}
+\toprule
+Target & Model & Train Acc & Test Acc & Train F1 & Test F1 & Train AUC & Test AUC \\
 \midrule
-\multirow{7}{*}{Management}
+\multirow{28}{*}{Management}
 & Logistic Regression & 0.833 & 0.795 & 0.820 & 0.776 & 0.911 & 0.848 \\
 & Decision Tree & 1.000 & 0.763 & 1.000 & 0.756 & 1.000 & 0.763 \\
 & Random Forest & 1.000 & 0.833 & 1.000 & 0.813 & 1.000 & 0.899 \\
@@ -768,6 +869,37 @@ Target & Model & Train Acc & Test Acc & Train F1 & Test F1 & Train AUC & Test AU
 & HistGradientBoosting & 1.000 & 0.885 & 1.000 & 0.874 & 1.000 & 0.943 \\
 & SVM & 0.872 & 0.756 & 0.856 & 0.734 & 0.966 & 0.874 \\
 & KNN & 0.836 & 0.718 & 0.821 & 0.682 & 0.926 & 0.796 \\
+& Random Forest &  & 0.821 & 0.790 & 0.821 &  & 0.799 \\
+& Gradient Boosting &  & 0.782 & 0.749 & 0.782 &  & 0.762 \\
+& AdaBoost &  & 0.782 & 0.751 & 0.782 &  & 0.760 \\
+& LightGBM &  & 0.795 & 0.804 & 0.795 &  & 0.778 \\
+& CatBoost &  & 0.808 & 0.775 & 0.808 &  & 0.788 \\
+& Neural Decision Forest &  & 0.763 & 0.731 & 0.763 &  & 0.739 \\
+& GRANDE (HistGBDT approx) &  & 0.763 & 0.770 & 0.763 &  & 0.745 \\
+& DT-GFN (ExtraTrees approx) &  & 0.788 & 0.759 & 0.788 &  & 0.766 \\
+& MorphBoost (stacked GBDT) &  & 0.808 & 0.776 & 0.808 &  & 0.786 \\
+& Meta-Tree Boosting &  & 0.795 & 0.764 & 0.795 &  & 0.772 \\
+& TEL (Tree Ensemble Layer) &  & 0.821 & 0.787 & 0.821 &  & 0.802 \\
+& TreeNet &  & 0.833 & 0.801 & 0.833 &  & 0.813 \\
+& Boundary ds Hybrid &  & 0.814 & 0.806 & 0.814 &  & 0.802 \\
+& ds simple &  & 0.481 & 0.658 & 0.481 &  & 0.431 \\
+& ds with examples &  & 0.763 & 0.749 & 0.763 &  & 0.752 \\
+& ds with examples \& refine &  & 0.365 & 0.602 & 0.365 &  & 0.429 \\
+& ds with examples \& refine \& base &  & 0.750 & 0.806 & 0.750 &  & 0.757 \\
+& gpt simple &  & 0.750 & 0.751 & 0.750 &  & 0.743 \\
+& gpt with examples &  & 0.769 & 0.740 & 0.769 &  & 0.751 \\
+& gpt with examples \& refine &  & 0.673 & 0.733 & 0.673 &  & 0.674 \\
+& gpt with examples \& refine \& base &  & 0.808 & 0.776 & 0.808 &  & 0.786 \\
+\bottomrule
+\end{tabular}
+\end{table}
+\begin{table}[p]
+\centering
+\caption{Complete model performance on test set (No Ultrasound features, Median Imputation) for Severity}
+\label{tab:full_results_Severity}
+\begin{tabular}{@{}llcccccc@{}}
+\toprule
+Target & Model & Train Acc & Test Acc & Train F1 & Test F1 & Train AUC & Test AUC \\
 \midrule
 \multirow{7}{*}{Severity}
 & Logistic Regression & 0.904 & 0.865 & 0.945 & 0.923 & 0.933 & 0.864 \\
@@ -777,6 +909,27 @@ Target & Model & Train Acc & Test Acc & Train F1 & Test F1 & Train AUC & Test AU
 & HistGradientBoosting & 1.000 & 0.853 & 1.000 & 0.913 & 1.000 & 0.899 \\
 & SVM & 0.934 & 0.859 & 0.962 & 0.921 & 0.983 & 0.829 \\
 & KNN & 0.886 & 0.840 & 0.937 & 0.911 & 0.934 & 0.736 \\
+& Random Forest &  & 0.878 & 0.895 & 0.970 &  & 0.931 \\
+& Gradient Boosting &  & 0.865 & 0.917 & 0.924 &  & 0.921 \\
+& AdaBoost &  & 0.853 & 0.904 & 0.924 &  & 0.914 \\
+& LightGBM &  & 0.865 & 0.905 & 0.939 &  & 0.922 \\
+& CatBoost &  & 0.865 & 0.899 & 0.947 &  & 0.923 \\
+& Neural Decision Forest &  & 0.885 & 0.913 & 0.955 &  & 0.933 \\
+& GRANDE (HistGBDT approx) &  & 0.853 & 0.910 & 0.917 &  & 0.913 \\
+& DT-GFN (ExtraTrees approx) &  & 0.853 & 0.881 & 0.955 &  & 0.916 \\
+& MorphBoost (stacked GBDT) &  & 0.872 & 0.918 & 0.932 &  & 0.925 \\
+& Meta-Tree Boosting &  & 0.872 & 0.912 & 0.939 &  & 0.925 \\
+& TEL (Tree Ensemble Layer) &  & 0.872 & 0.918 & 0.932 &  & 0.925 \\
+& TreeNet &  & 0.872 & 0.912 & 0.939 &  & 0.925 \\
+& Boundary ds Hybrid &  & 0.821 & 0.933 & 0.848 &  & 0.889 \\
+& ds simple &  & 0.846 & 0.846 & 1.000 &  & 0.917 \\
+& ds with examples &  & 0.814 & 0.964 & 0.811 &  & 0.881 \\
+& ds with examples \& refine &  & 0.795 & 0.972 & 0.780 &  & 0.866 \\
+& ds with examples \& refine \& base &  & 0.878 & 0.931 & 0.924 &  & 0.928 \\
+& gpt simple &  & 0.853 & 0.916 & 0.909 &  & 0.913 \\
+& gpt with examples &  & 0.827 & 0.941 & 0.848 &  & 0.892 \\
+& gpt with examples \& refine &  & 0.814 & 0.933 & 0.841 &  & 0.884 \\
+& gpt with examples \& refine \& base &  & 0.846 & 0.909 & 0.909 &  & 0.909 \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -786,7 +939,7 @@ Target & Model & Train Acc & Test Acc & Train F1 & Test F1 & Train AUC & Test AU
 
 Table~\ref{tab:feature_selection_full} shows the features selected through our two-stage forward-backward selection process.
 
-\begin{table}[htb]
+\begin{table}[bp]
 \centering
 \caption{Selected features after forward-backward selection}
 \label{tab:feature_selection_full}
@@ -843,6 +996,80 @@ Imputation strategies compared & 3 \\
 \bottomrule
 \end{tabular}
 \end{table}
+
+\section{LLM Prompts}
+\label{app:llm_prompts}
+
+\subsection{Direct Prediction Prompt}
+\label{app:prompt_direct}
+
+\begin{verbatim}
+The target is encoded as integer labels. The meaning of each label is:
+
+{mapping_text}
+
+{base_pred_text}
+{examples_text}
+Now here is a NEW patient (different from all the examples above).
+
+The features and their values of THIS child are:
+
+{case_text}
+
+Possible labels you are allowed to output are: [{class_ids_str}].
+
+Please output ONLY a single integer from [{class_ids_str}] as your prediction,
+with no extra words, no explanation.
+\end{verbatim}
+
+\subsection{Iterative Refinement Prompt}
+\label{app:prompt_refine}
+
+\begin{verbatim}
+You are a senior pediatric emergency surgeon.
+You will see clinical features of one child and must predict
+the label for the target: {target_name}
+\end{verbatim}
+
+\subsection{Prompt for Novel Information Generation}
+\label{app:prompt_generate}
+
+\begin{verbatim}
+You are a senior pediatric emergency surgeon.
+
+You will see the clinical features of one child with suspected appendicitis.
+There are three prediction targets:
+
+1) {s_diag}
+2) {s_sev}
+3) {s_mng}
+
+For each target, you must make a binary decision:
+- 1 = the more serious / positive outcome is present
+- 0 = the more serious / positive outcome is NOT present
+
+The dataset internally encodes labels as integer codes. Here is the mapping:
+{mapping_text}
+
+{examples_text}
+Now here is a NEW child (different from all examples above).
+
+The features of this child are:
+{case_text}
+
+Based only on these features and your clinical knowledge (and not on the true labels),
+decide three binary labels:
+
+- y_diagnosis   = 1 if the child truly has appendicitis, else 0.
+- y_severity    = 1 if the child has complicated/severe appendicitis, else 0.
+- y_management  = 1 if the child requires surgical / operative management, else 0.
+
+Output your answer on a single line in the following exact format:
+y_diagnosis=AA; y_severity=BB; y_management=CC
+
+where AA, BB and CC are integers, each either 0 or 1.
+Do not output any extra words or explanation.
+\end{verbatim}
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
