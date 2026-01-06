@@ -44,6 +44,9 @@ Run the preprocessing script to clean the data, handle missing values, and gener
 python preprocess.py
 ```
 This will create `.npy` files in the `processed_data/` directory.
+(For features augmented with LLM-generated information, we provide `script_for_generate_LLM_information.py` as an example script. This script requires you to specify which LLM to use and to set the corresponding API key. The file `llm.py` implements an `LLM` class that can be used to generate additional information via an LLM.
+In general, however, the `processed_data/` directory already contains the dataset augmented with the LLM-generated features.
+You need to set your api and set your PKU clash port for gpt model.)
 
 ### 2. Exploratory Data Analysis
 Generate correlation plots and other visualizations to understand the data distribution.
@@ -58,6 +61,7 @@ Train various machine learning models (Logistic Regression, Random Forest, Gradi
 python model_training.py
 ```
 Results (CSV files) will be saved in the `models/` directory.
+(Alternatively, you can use `model_training_for_tree_and_LLM.py`, which provides the same functionality but is configured for the tree-based and LLM-based settings. You need to set your api and set your PKU clash port for gpt model.)
 
 ## Key Results
 The project evaluates models on three tasks:
